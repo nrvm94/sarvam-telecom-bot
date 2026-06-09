@@ -94,6 +94,8 @@ class SarvamClient:
         )
 
         # Build multipart form — field 'file' is required by Sarvam STT
+        # Model: saarika = transcription in original language (what we need)
+        #        saaras  = speech-to-English translation (NOT what we need)
         data = aiohttp.FormData()
         data.add_field(
             "file",
@@ -102,8 +104,7 @@ class SarvamClient:
             content_type="audio/webm",
         )
         data.add_field("language_code", language)
-        data.add_field("model", "saaras:v2")
-        data.add_field("with_timestamps", "false")
+        data.add_field("model", "saarika:v2.5")
 
         url = f"{self.base_url}/speech-to-text"
         logger.debug("STT | POST %s", url)

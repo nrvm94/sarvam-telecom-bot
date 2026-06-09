@@ -199,20 +199,27 @@ async def transcribe_and_respond(req: TranscribeRequest):
     lang_map = {"hi": "hi-IN", "en": "en-IN"}
     sarvam_lang = lang_map.get(req.language, req.language)
 
+    # Track which pipeline step we're on for precise error reporting
+    step = "initialising"
+
     try:
         # Step 1 — Decode audio
+        step = "Step 1: decode audio"
         audio_bytes = base64.b64decode(req.audio_base64)
         logger.debug("Step 1 — Audio decoded | bytes=%d", len(audio_bytes))
 
         # Step 2 — STT
+        step = "Step 2: STT (Sarvam Saarika)"
         transcription = await sarvam_client.transcribe_audio(audio_bytes, sarvam_lang)
         logger.info("Step 2 — STT done | transcription=%r", transcription[:100])
 
         # Step 3 — RAG
+        step = "Step 3: RAG knowledge base query"
         context = await rag_engine.query(transcription)
         logger.info("Step 3 — RAG done | context_len=%d", len(context))
 
         # Step 4 — LLM response
+        step = "Step 4: LLM response (Sarvam sarvam-30b)"
         bot_response = await sarvam_client.generate_response(
             query=transcription,
             context=context,
@@ -221,16 +228,19 @@ async def transcribe_and_respond(req: TranscribeRequest):
         logger.info("Step 4 — LLM done | response=%r", bot_response[:100])
 
         # Step 5 — Escalation detection
+        step = "Step 5: escalation detection"
         escalate = await conversation_manager.detect_escalation(
             transcription, bot_response
         )
         logger.info("Step 5 — Escalation=%s", escalate)
 
         # Step 6 — Issue classification
+        step = "Step 6: issue classification"
         issue_type = await conversation_manager.classify_issue(transcription)
         logger.info("Step 6 — Issue type=%s", issue_type)
 
         # Step 7 — TTS
+        step = "Step 7: TTS (Sarvam Bulbul)"
         audio_out_bytes = await sarvam_client.synthesize_speech(
             text=bot_response,
             language=sarvam_lang,
@@ -239,9 +249,11 @@ async def transcribe_and_respond(req: TranscribeRequest):
         logger.info("Step 7 — TTS done | audio_bytes=%d", len(audio_out_bytes))
 
         # Step 8 — Encode audio for JSON transport
+        step = "Step 8: encode audio"
         response_audio_b64 = base64.b64encode(audio_out_bytes).decode("utf-8")
 
         # Step 9 — Log to Supabase
+        step = "Step 9: log to Supabase"
         await supabase_client.log_conversation_turn(
             req.call_id, transcription, bot_response, req.language
         )
@@ -264,12 +276,15 @@ async def transcribe_and_respond(req: TranscribeRequest):
         }
 
     except Exception as exc:  # pylint: disable=broad-except
-        logger.error("Transcribe pipeline failed: %s", exc, exc_info=True)
+        logger.error(
+            "Pipeline failed at [%s]: %s", step, exc, exc_info=True
+        )
         return JSONResponse(
             status_code=500,
             content={
-                "error": str(exc),
-                "detail": "Voice pipeline failed. Please try again.",
+                "error": f"[{step}] {str(exc)}",
+                "detail": f"Pipeline failed at: {step}",
+                "step": step,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
