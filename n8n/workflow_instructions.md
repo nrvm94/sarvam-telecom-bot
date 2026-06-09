@@ -86,7 +86,7 @@ It creates a support ticket, sends a WhatsApp notification, and logs the escalat
    - **Method:** POST
    - **URL:** `https://waba-sandbox.360dialog.io/v1/messages`
    - **Headers:**
-     - `D360-API-KEY`: `Z47MFTHQK4QUB1O7GFMD2UOP6TPYL643`
+     - `D360-API-KEY`: `<your DIALOG_360_API_KEY from .env>`
      - `Content-Type`: `application/json`
    - **Body:**
      ```json
