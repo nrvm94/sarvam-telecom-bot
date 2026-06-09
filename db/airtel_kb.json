@@ -1,0 +1,107 @@
+[
+  {
+    "id": "kb_001",
+    "category": "prepaid_plans",
+    "content": "Airtel Prepaid Plan ₹199: 28 days validity, 1GB data per day (28GB total), unlimited Airtel-to-Airtel calls, 100 SMS/day. Best for light data users. Includes free Hellotunes activation."
+  },
+  {
+    "id": "kb_002",
+    "category": "prepaid_plans",
+    "content": "Airtel Prepaid Plan ₹299: 28 days validity, 2GB data per day (56GB total), unlimited calls to all networks, 100 SMS/day. Includes free subscription to Airtel Xstream mobile app."
+  },
+  {
+    "id": "kb_003",
+    "category": "prepaid_plans",
+    "content": "Airtel Prepaid Plan ₹399: 56 days validity, 2.5GB data per day (140GB total), unlimited calls to all networks, 100 SMS/day. Includes Amazon Prime Mobile subscription for 3 months."
+  },
+  {
+    "id": "kb_004",
+    "category": "prepaid_plans",
+    "content": "Airtel Prepaid Plan ₹599: 84 days validity, 2GB data per day (168GB total), unlimited calls to all networks, 100 SMS/day. Includes Disney+ Hotstar Mobile for 3 months and Wynk Music subscription."
+  },
+  {
+    "id": "kb_005",
+    "category": "postpaid_plans",
+    "content": "Airtel Postpaid Plan ₹499: 75GB data per month, unlimited calls to all Indian networks, 100 SMS/day, free Airtel Xstream Premium subscription. Ideal for individual users with moderate data needs."
+  },
+  {
+    "id": "kb_006",
+    "category": "postpaid_plans",
+    "content": "Airtel Postpaid Plan ₹799: 125GB data per month, unlimited calls, family add-on connection at ₹99/month, free Amazon Prime and Airtel Xstream Premium. Includes data rollover of up to 200GB."
+  },
+  {
+    "id": "kb_007",
+    "category": "postpaid_plans",
+    "content": "Airtel Postpaid Plan ₹999: 200GB data per month, unlimited calls, international roaming benefits on select destinations, free Netflix Basic plan, Amazon Prime, and Airtel Xstream. Data rollover up to 400GB."
+  },
+  {
+    "id": "kb_008",
+    "category": "postpaid_plans",
+    "content": "Airtel Postpaid Plan ₹1499 (Airtel Black Unlimited 5G): Unlimited 5G data, unlimited calls, international calling minutes, multiple OTT subscriptions including Netflix, Amazon Prime, Disney+ Hotstar. Priority customer support."
+  },
+  {
+    "id": "kb_009",
+    "category": "balance_check",
+    "content": "To check your Airtel balance: 1) Dial *121# from your Airtel number and select option 1. 2) Open MyAirtel app → Home screen shows balance and data remaining. 3) SMS 'BAL' to 121. 4) Call 121 and follow IVR. Balance information includes main account balance, data balance, and validity date."
+  },
+  {
+    "id": "kb_010",
+    "category": "data_usage",
+    "content": "To check Airtel data balance: 1) Dial *121*8# — instant USSD data balance. 2) MyAirtel app → Data section shows used/remaining data with daily breakdown. 3) SMS 'DATA' to 121. 4) Dial *121# → select 'Data Balance'. You will receive an SMS with your 4G/5G data status, validity, and daily consumption."
+  },
+  {
+    "id": "kb_011",
+    "category": "recharge",
+    "content": "How to recharge Airtel: 1) MyAirtel app (fastest, no extra charges). 2) Airtel website: airtel.in/recharge. 3) Paytm, Google Pay, PhonePe — select 'Mobile Recharge'. 4) Any Airtel retail store or authorized outlet. 5) Net banking or credit/debit card via airtel.in. 6) USSD: Dial *121# → Recharge. Recharge is instant for most payment methods."
+  },
+  {
+    "id": "kb_012",
+    "category": "customer_care",
+    "content": "Airtel Customer Care contacts: 1) Dial 121 (toll-free from Airtel number, 24/7). 2) Dial 98XXXXXX10 from other network numbers. 3) MyAirtel app → Help section → Chat with us. 4) Email: airtel.presence@in.airtel.com. 5) Twitter: @Airtel_Presence for quick resolution. 6) Nodal Officer: nodalofficer@in.airtel.com for unresolved complaints. Average wait time is 3-5 minutes."
+  },
+  {
+    "id": "kb_013",
+    "category": "5g_service",
+    "content": "Airtel 5G Plus is available in 100+ cities including Delhi, Mumbai, Chennai, Kolkata, Bangalore, Hyderabad, Ahmedabad, Pune, and more. To check: 1) Open MyAirtel app → Coverage Map. 2) Visit airtel.in/5g. You need a 5G-compatible phone and an Airtel 5G SIM. No extra charge for 5G — available on all postpaid plans and select prepaid packs. Speeds up to 1 Gbps in 5G zones."
+  },
+  {
+    "id": "kb_014",
+    "category": "number_portability",
+    "content": "Airtel Mobile Number Portability (MNP): SMS 'PORT <your 10-digit number>' to 1900. You will receive a Unique Porting Code (UPC) valid for 4 days. Visit nearest Airtel store with UPC, ID proof, and address proof. Process takes 7 working days. Your current number is preserved. Service continuity is maintained — outage is less than 2 hours during porting."
+  },
+  {
+    "id": "kb_015",
+    "category": "bill_payment",
+    "content": "Airtel Postpaid Bill Payment options: 1) MyAirtel app — auto-pay setup with UPI/card. 2) UPI (Google Pay, PhonePe, Paytm) — search Airtel and pay. 3) Net banking via airtel.in. 4) Credit/Debit card on website or app. 5) Airtel stores — cash or card. 6) Auto-pay: set up via MyAirtel app, deducts automatically on due date. Bill due date is 18th of each month for most accounts. Late payment charge: ₹100."
+  },
+  {
+    "id": "kb_016",
+    "category": "international_roaming",
+    "content": "Airtel International Roaming — iRoam Packs: Day pack from ₹599/day for 1GB data + unlimited calls in USA/UK/UAE. Monthly packs available for long trips. Activate via: 1) MyAirtel app → International → iRoam. 2) Call 121 before travel. 3) SMS 'ROAM' to 121. Data speeds in 150+ countries. Emergency roaming auto-activates in some countries — check with 121 before travel."
+  },
+  {
+    "id": "kb_017",
+    "category": "sim_replacement",
+    "content": "Airtel SIM Replacement / Upgrade: Visit nearest Airtel store with original ID proof (Aadhaar/PAN/Passport). SIM replacement fee: ₹25. 4G SIM upgrade from 2G/3G SIM: Free. eSIM conversion: Available for compatible devices via MyAirtel app. Processing time: 4 hours for SIM activation. For lost/stolen SIM: Call 121 immediately to block old SIM, then visit store for replacement."
+  },
+  {
+    "id": "kb_018",
+    "category": "network_issues",
+    "content": "Airtel Network Troubleshooting: 1) Restart your phone — clears most connectivity issues. 2) Check coverage: airtel.in/network-coverage or MyAirtel app → Coverage Map. 3) Toggle Airplane mode ON then OFF. 4) Check if data is enabled: Settings → Mobile Data → ON. 5) APN Settings: Reset to default (automatic). 6) If problem persists: Call 121 for network complaint — resolution in 24-48 hours. 7) Scheduled maintenance notifications via SMS."
+  },
+  {
+    "id": "kb_019",
+    "category": "airtel_black",
+    "content": "Airtel Black — Premium Family Service: Single account for multiple Airtel connections (mobile, broadband, DTH). Benefits: Single bill, single app, family data sharing, priority customer support. Plans: ₹999/month for 2 connections, ₹1499/month for 3 connections, ₹1999/month for 4+ connections. Includes OTT bundles, family safety features. Call 121 or visit airtel.in/airtel-black to enroll."
+  },
+  {
+    "id": "kb_020",
+    "category": "value_added_services",
+    "content": "Airtel Value Added Services: 1) Airtel Xstream Premium — 10,000+ movies and shows, free with ₹299+ plans. 2) Wynk Music — 60+ million songs, free with ₹399+ plans. 3) Hellotunes — custom caller tunes, ₹30/month. 4) Device protection insurance — available via MyAirtel app. 5) McAfee Security — free with select plans. To activate/deactivate: MyAirtel app → Services, or SMS to 121."
+  },
+  {
+    "id": "kb_021",
+    "category": "complaint_escalation",
+    "content": "Airtel Complaint Escalation Process: 1) First contact: Call 121 or use MyAirtel app chat — get complaint reference number. 2) If unresolved in 3 days: Email nodalofficer@in.airtel.com with complaint number. 3) Appellate Authority: Email appellate@in.airtel.com if Nodal Officer doesn't resolve in 30 days. 4) TRAI (Telecom Regulatory Authority): File complaint at trai.gov.in or call 1800-110-070. 5) Consumer Forum: If all else fails, approach consumer court with evidence."
+  }
+]
