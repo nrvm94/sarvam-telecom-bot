@@ -11,25 +11,168 @@ Auth:
 """
 
 import base64
+import io
 import logging
 import os
+import re
+import time
+import wave
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
 
-# Map generic voice names → real Sarvam Bulbul v2 speaker IDs
-# bulbul:v2 voices: anushka, manisha, vidya, arya, abhilash, karun, hitesh
-# bulbul:v3 voices include: ritu, anushka, rahul, priya, ...
+# Map generic voice names → real Sarvam Bulbul v3 speaker IDs
+# bulbul:v3 female voices: ritu, priya, neha, pooja, simran, kavya, ishita, ...
+# bulbul:v3 male voices:   rahul, amit, aditya, rohan, ashutosh, dev, varun, ...
 VOICE_MAP = {
-    "female_1": "anushka",
-    "female_2": "manisha",
-    "female_3": "vidya",
-    "male_1": "abhilash",
-    "male_2": "karun",
-    "male_3": "hitesh",
+    "female_1": "ritu",
+    "female_2": "priya",
+    "female_3": "neha",
+    "male_1": "rahul",
+    "male_2": "amit",
+    "male_3": "aditya",
     # Pass-through any real speaker name as-is
 }
+
+# Mobile generation terms: only these need explicit normalization.
+# Sarvam TTS handles GB, MB, VoLTE, OTP, UPI etc. natively via enable_preprocessing.
+_GENERATION_REPLACEMENTS = [
+    (r'\b5[Gg]\b', 'five G'),
+    (r'\b4[Gg]\b', 'four G'),
+    (r'\b3[Gg]\b', 'three G'),
+    (r'\b2[Gg]\b', 'two G'),
+]
+
+# ---- Number-to-words helpers -----------------------------------------------
+
+_EN_ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight",
+            "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+            "sixteen", "seventeen", "eighteen", "nineteen"]
+_EN_TENS = ["", "", "twenty", "thirty", "forty", "fifty",
+            "sixty", "seventy", "eighty", "ninety"]
+
+
+def _num_to_words_en(n: int) -> str:
+    if n < 0: return "minus " + _num_to_words_en(-n)
+    if n == 0: return "zero"
+    if n < 20: return _EN_ONES[n]
+    if n < 100: return _EN_TENS[n // 10] + (" " + _EN_ONES[n % 10] if n % 10 else "")
+    if n < 1000: return _EN_ONES[n // 100] + " hundred" + (" " + _num_to_words_en(n % 100) if n % 100 else "")
+    if n < 100000: return _num_to_words_en(n // 1000) + " thousand" + (" " + _num_to_words_en(n % 1000) if n % 1000 else "")
+    return str(n)  # fallback for very large numbers
+
+
+_HI_ONES = ["", "ek", "do", "teen", "chaar", "paanch", "cheh", "saat", "aath", "nau",
+            "das", "gyarah", "barah", "terah", "chaudah", "pandrah", "solah",
+            "satrah", "atharah", "unnees"]
+_HI_TENS = ["", "", "bees", "tees", "chaalees", "pachaas",
+            "saath", "sattar", "assee", "nabbe"]
+
+
+def _num_to_words_hi(n: int) -> str:
+    if n < 0: return "minus " + _num_to_words_hi(-n)
+    if n == 0: return "shoonya"
+    if n < 20: return _HI_ONES[n]
+    if n < 100: return _HI_TENS[n // 10] + (" " + _HI_ONES[n % 10] if n % 10 else "")
+    if n < 1000: return _HI_ONES[n // 100] + " sau" + (" " + _num_to_words_hi(n % 100) if n % 100 else "")
+    if n < 100000: return _num_to_words_hi(n // 1000) + " hazaar" + (" " + _num_to_words_hi(n % 1000) if n % 1000 else "")
+    return str(n)
+
+
+def normalize_for_tts(text: str, language: str) -> str:
+    """
+    Minimal pre-processing before sending to Sarvam TTS.
+
+    Sarvam bulbul:v3 with enable_preprocessing=True handles numbers, abbreviations,
+    and most symbols natively. We only fix the two things it can't:
+      1. Mobile generation terms (5G/4G) — TTS may read as raw digits or wrong words.
+      2. Currency symbol ₹ — not always parsed correctly.
+    """
+    is_hindi = language in ("hi", "hi-IN", "mr", "mr-IN")
+
+    # Mobile generation terms (word-boundary, case-insensitive)
+    for pattern, replacement in _GENERATION_REPLACEMENTS:
+        text = re.sub(pattern, replacement, text)
+
+    # Currency symbol → spoken word
+    text = text.replace("₹", "रुपये " if is_hindi else "rupees ")
+
+    return text
+
+
+_TTS_MAX_CHARS = 490  # Sarvam TTS limit is 500; use 490 for safety
+
+
+def _split_text_for_tts(text: str, max_chars: int = _TTS_MAX_CHARS) -> list:
+    """
+    Split text into chunks of at most max_chars, preferring sentence boundaries
+    (। . ! ?) then word boundaries. Works for Hindi, Marathi, and English.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    sentence_splitter = re.compile(r'(?<=[।.!?])\s+')
+    sentences = sentence_splitter.split(text)
+
+    chunks = []
+    current = ""
+    for sentence in sentences:
+        # A single sentence longer than max_chars — split at word boundaries
+        if len(sentence) > max_chars:
+            words = sentence.split()
+            for word in words:
+                candidate = (current + " " + word).strip() if current else word
+                if len(candidate) > max_chars:
+                    if current:
+                        chunks.append(current.strip())
+                    current = word
+                else:
+                    current = candidate
+        else:
+            candidate = (current + " " + sentence).strip() if current else sentence
+            if len(candidate) > max_chars:
+                if current:
+                    chunks.append(current.strip())
+                current = sentence
+            else:
+                current = candidate
+
+    if current:
+        chunks.append(current.strip())
+
+    # Safety: hard-truncate any chunk that somehow exceeds the limit
+    # (e.g. a single token with no whitespace > max_chars)
+    safe = []
+    for chunk in chunks:
+        if chunk:
+            while len(chunk) > max_chars:
+                safe.append(chunk[:max_chars])
+                chunk = chunk[max_chars:]
+            if chunk:
+                safe.append(chunk)
+    return safe
+
+
+def _concat_wav_buffers(buffers: list) -> bytes:
+    """Concatenate a list of WAV byte-buffers into a single WAV."""
+    if len(buffers) == 1:
+        return buffers[0]
+
+    all_frames = []
+    params = None
+    for buf in buffers:
+        with wave.open(io.BytesIO(buf)) as wf:
+            if params is None:
+                params = wf.getparams()
+            all_frames.append(wf.readframes(wf.getnframes()))
+
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wf:
+        wf.setparams(params)
+        for frames in all_frames:
+            wf.writeframes(frames)
+    return out.getvalue()
 
 
 class SarvamClient:
@@ -84,7 +227,7 @@ class SarvamClient:
 
         Args:
             audio_bytes: Raw WebM/Opus audio captured from browser microphone.
-            language:    BCP-47 code, e.g. "hi-IN" or "en-IN".
+            language:    BCP-47 code, e.g. "hi-IN" or "en-IN" or "mr-IN".
 
         Returns:
             Transcribed text string.
@@ -107,18 +250,24 @@ class SarvamClient:
         data.add_field("model", "saarika:v2.5")
 
         url = f"{self.base_url}/speech-to-text"
-        logger.debug("STT | POST %s", url)
+        logger.debug("STT | POST %s | language=%s | audio_bytes=%d", url, language, len(audio_bytes))
 
+        t0 = time.time()
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
                 data=data,
                 headers=self._subscription_headers(),  # api-subscription-key
             ) as resp:
+                elapsed_ms = (time.time() - t0) * 1000
                 body = await resp.json(content_type=None)
-                logger.debug("STT | status=%d | body=%s", resp.status, str(body)[:300])
+                logger.debug("STT | status=%d | elapsed=%.0fms | body=%s", resp.status, elapsed_ms, str(body)[:300])
 
                 if resp.status != 200:
+                    logger.error(
+                        "STT failed | status=%d | language=%s | body=%s",
+                        resp.status, language, str(body)[:500],
+                    )
                     raise RuntimeError(
                         f"Sarvam STT failed: HTTP {resp.status} | {body}"
                     )
@@ -131,9 +280,8 @@ class SarvamClient:
                     or ""
                 )
                 logger.info(
-                    "STT done | language=%s | transcript=%r",
-                    language,
-                    transcript[:120],
+                    "STT done | language=%s | elapsed=%.0fms | transcript=%r",
+                    language, elapsed_ms, transcript[:120],
                 )
                 return transcript
 
@@ -142,7 +290,8 @@ class SarvamClient:
     # ------------------------------------------------------------------
 
     async def generate_response(
-        self, query: str, context: str, language: str = "hi"
+        self, query: str, context: str, language: str = "hi", history: list = None,
+        system_prompt_override: str = None
     ) -> str:
         """
         Generate an Airtel customer-support reply using Sarvam LLM.
@@ -150,36 +299,38 @@ class SarvamClient:
         Uses /v1/chat/completions (OpenAI-compatible) with Authorization: Bearer.
 
         Args:
-            query:    Customer's transcription / question.
-            context:  RAG context from the Airtel knowledge base.
-            language: "hi" for Hindi, "en" for English.
+            query:                   Customer's transcription / question.
+            context:                 RAG context (appended to user message if non-empty).
+            language:                "hi" for Hindi, "en" for English.
+            history:                 Prior turns as [{"role": "user"|"assistant", "content": "..."}].
+            system_prompt_override:  When provided, replaces the default generic system prompt.
+                                     Use this to inject customer-specific instructions and data.
 
         Returns:
             Bot response text.
         """
-        if language.startswith("hi"):
-            system_content = (
-                "Aap ek helpful Airtel customer support agent hain. "
-                "Sirf Hindi mein jawab dein. "
-                "2-3 sentences mein concise aur clear jawab dein."
-            )
-        else:
-            system_content = (
-                "You are a helpful Airtel customer support agent. "
-                "Answer only in English. "
-                "Keep your response concise, 2-3 sentences maximum."
-            )
+        system_content = system_prompt_override or (
+            "You are a helpful Airtel customer support agent. "
+            "Detect the language of the user's message and respond in the SAME language and style. "
+            "If the user writes in Hindi (Devanagari script), respond only in Hindi using Devanagari script — no Roman Hindi. "
+            "If the user writes in English, respond only in English. "
+            "If the user mixes Hindi and English (code-switching), mirror their style naturally. "
+            "Keep your response concise, 2-3 sentences maximum."
+        )
 
         user_content = query
         if context and context.strip():
             user_content += f"\n\nRelevant Information:\n{context}"
 
+        # Build messages: system → history (last 10 msgs = 5 exchanges) → current query
+        messages = [{"role": "system", "content": system_content}]
+        if history:
+            messages.extend(history[-10:])
+        messages.append({"role": "user", "content": user_content})
+
         payload = {
             "model": "sarvam-30b",
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": user_content},
-            ],
+            "messages": messages,
             "temperature": 0.3,
             # Do NOT set max_tokens — sarvam-30b and sarvam-105b are reasoning models
             # that spend ~1500-2000 tokens on internal chain-of-thought before writing
@@ -189,30 +340,37 @@ class SarvamClient:
 
         url = f"{self.base_url}/v1/chat/completions"
         logger.debug(
-            "LLM | POST %s | query=%r | context_len=%d",
-            url,
-            query[:80],
-            len(context),
+            "LLM | POST %s | query=%r | context_len=%d | history_msgs=%d",
+            url, query[:80], len(context), len(messages),
         )
 
+        t0 = time.time()
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
                 json=payload,
                 headers=self._bearer_headers(),  # Authorization: Bearer
             ) as resp:
+                elapsed_ms = (time.time() - t0) * 1000
                 body = await resp.json(content_type=None)
                 logger.debug(
-                    "LLM | status=%d | body=%s", resp.status, str(body)[:400]
+                    "LLM | status=%d | elapsed=%.0fms | body=%s",
+                    resp.status, elapsed_ms, str(body)[:400],
                 )
 
                 if resp.status != 200:
+                    logger.error(
+                        "LLM failed | status=%d | elapsed=%.0fms | body=%s",
+                        resp.status, elapsed_ms, str(body)[:500],
+                    )
                     raise RuntimeError(
                         f"Sarvam LLM failed: HTTP {resp.status} | {body}"
                     )
 
                 choices = body.get("choices") or [{}]
-                message = choices[0].get("message") or {}
+                choice0 = choices[0]
+                message = choice0.get("message") or {}
+                finish_reason = choice0.get("finish_reason", "unknown")
 
                 # sarvam-105b may return content=None with reasoning_content populated
                 # when token budget runs out. Fall back to reasoning_content in that case.
@@ -222,12 +380,76 @@ class SarvamClient:
                     or ""
                 )
 
+                if not response_text:
+                    logger.warning(
+                        "LLM returned empty content | finish_reason=%s | elapsed=%.0fms | body=%s",
+                        finish_reason, elapsed_ms, str(body)[:300],
+                    )
+
                 logger.info(
-                    "LLM done | query=%r | response=%r",
-                    query[:60],
-                    str(response_text)[:120],
+                    "LLM done | elapsed=%.0fms | finish_reason=%s | response_len=%d | response=%r",
+                    elapsed_ms, finish_reason, len(response_text), str(response_text)[:120],
                 )
                 return response_text
+
+    # ------------------------------------------------------------------
+    # Method 2b — Chat Completions WITH tool-calling
+    # ------------------------------------------------------------------
+
+    async def chat_with_tools(
+        self, messages: list, tools: list, temperature: float = 0.3
+    ) -> dict:
+        """
+        Low-level chat call that supports OpenAI-style function/tool calling.
+
+        Returns the raw assistant `message` dict, which may contain either
+        `content` (final answer) or `tool_calls` (the model wants data fetched).
+        The caller runs the tool, appends a {"role":"tool",...} message, and
+        calls this again. NOTE: the Sarvam endpoint requires `tools` to be sent
+        on EVERY call once any tool message is in the history.
+
+        Args:
+            messages:    Full OpenAI-format message list (system, user, assistant, tool).
+            tools:       OpenAI tools schema array.
+            temperature: Sampling temperature.
+
+        Returns:
+            The assistant message dict from choices[0].message.
+        """
+        payload = {
+            "model": "sarvam-30b",
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": temperature,
+        }
+
+        url = f"{self.base_url}/v1/chat/completions"
+        logger.debug("LLM+tools | POST %s | msgs=%d | tools=%d", url, len(messages), len(tools))
+
+        t0 = time.time()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url, json=payload, headers=self._bearer_headers()
+            ) as resp:
+                elapsed_ms = (time.time() - t0) * 1000
+                body = await resp.json(content_type=None)
+                logger.debug("LLM+tools | status=%d | elapsed=%.0fms | body=%s", resp.status, elapsed_ms, str(body)[:400])
+
+                if resp.status != 200:
+                    logger.error("LLM+tools failed | status=%d | elapsed=%.0fms | body=%s", resp.status, elapsed_ms, str(body)[:500])
+                    raise RuntimeError(
+                        f"Sarvam LLM (tools) failed: HTTP {resp.status} | {body}"
+                    )
+
+                choices = body.get("choices") or [{}]
+                message = choices[0].get("message") or {}
+                logger.info(
+                    "LLM+tools done | elapsed=%.0fms | tool_calls=%s | content_len=%d",
+                    elapsed_ms, bool(message.get("tool_calls")),
+                    len(message.get("content") or ""),
+                )
+                return message
 
     # ------------------------------------------------------------------
     # Method 3 — Text-to-Speech (Bulbul)
@@ -242,36 +464,67 @@ class SarvamClient:
         """
         Convert text to speech using Sarvam Bulbul TTS.
 
+        Automatically splits text that exceeds the 500-character API limit into
+        sentence-boundary chunks and concatenates the resulting WAV buffers.
+
         Args:
             text:     Text to synthesise.
-            language: BCP-47 code, e.g. "hi-IN".
-            voice:    Generic voice alias ("female_1") or real speaker name ("anushka").
+            language: BCP-47 code, e.g. "hi-IN" or "mr-IN".
+            voice:    Generic voice alias ("female_1") or real speaker name ("ritu").
 
         Returns:
             Raw WAV audio bytes.
         """
+        text = normalize_for_tts(text, language)
         # Map generic alias → real speaker name; pass-through if already real
         speaker = VOICE_MAP.get(voice, voice)
         # Ensure language has region suffix
-        lang_code = language if "-" in language else f"{language}-IN"
+        lang_code = language if "-" in language else {
+            "hi": "hi-IN", "mr": "mr-IN", "en": "en-IN"
+        }.get(language, f"{language}-IN")
 
+        chunks = _split_text_for_tts(text)
+        if len(chunks) > 1:
+            logger.info(
+                "TTS | text too long (%d chars) — splitting into %d chunks | language=%s | speaker=%s",
+                len(text), len(chunks), lang_code, speaker,
+            )
+
+        t_total = time.time()
+        audio_buffers = []
+        for idx, chunk in enumerate(chunks, start=1):
+            audio = await self._synthesize_chunk(chunk, lang_code, speaker, idx, len(chunks))
+            audio_buffers.append(audio)
+
+        combined = _concat_wav_buffers(audio_buffers)
+        total_ms = (time.time() - t_total) * 1000
+        logger.info(
+            "TTS done | chunks=%d | total_elapsed=%.0fms | language=%s | speaker=%s | text_len=%d | output_bytes=%d",
+            len(chunks), total_ms, lang_code, speaker, len(text), len(combined),
+        )
+        return combined
+
+    async def _synthesize_chunk(
+        self, text: str, lang_code: str, speaker: str, chunk_idx: int = 1, total_chunks: int = 1
+    ) -> bytes:
+        """Send a single ≤500-char chunk to the Sarvam TTS API and return WAV bytes."""
         payload = {
-            "text": text,
+            "inputs": [text],
             "target_language_code": lang_code,
             "speaker": speaker,
-            "model": "bulbul:v2",
+            "model": "bulbul:v3",
             "pace": 1.0,
+            "speech_sample_rate": 8000,
+            "enable_preprocessing": True,
         }
 
         url = f"{self.base_url}/text-to-speech"
         logger.debug(
-            "TTS | POST %s | text_len=%d | language=%s | speaker=%s",
-            url,
-            len(text),
-            lang_code,
-            speaker,
+            "TTS chunk %d/%d | POST %s | text_len=%d | language=%s | speaker=%s | text=%r",
+            chunk_idx, total_chunks, url, len(text), lang_code, speaker, text[:60],
         )
 
+        t0 = time.time()
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
@@ -281,14 +534,19 @@ class SarvamClient:
                     "Content-Type": "application/json",
                 },
             ) as resp:
+                elapsed_ms = (time.time() - t0) * 1000
                 body = await resp.json(content_type=None)
                 logger.debug(
-                    "TTS | status=%d | body_keys=%s",
-                    resp.status,
+                    "TTS chunk %d/%d | status=%d | elapsed=%.0fms | body_keys=%s",
+                    chunk_idx, total_chunks, resp.status, elapsed_ms,
                     list(body.keys()) if isinstance(body, dict) else "non-dict",
                 )
 
                 if resp.status != 200:
+                    logger.error(
+                        "TTS chunk %d/%d failed | status=%d | elapsed=%.0fms | language=%s | speaker=%s | body=%s",
+                        chunk_idx, total_chunks, resp.status, elapsed_ms, lang_code, speaker, str(body)[:500],
+                    )
                     raise RuntimeError(
                         f"Sarvam TTS failed: HTTP {resp.status} | {body}"
                     )
@@ -296,16 +554,17 @@ class SarvamClient:
                 # Response: {"audios": ["<base64_wav>"]}
                 audios = body.get("audios") or []
                 if not audios:
+                    logger.error(
+                        "TTS chunk %d/%d returned empty audios | elapsed=%.0fms | body=%s",
+                        chunk_idx, total_chunks, elapsed_ms, str(body)[:300],
+                    )
                     raise RuntimeError(
                         f"Sarvam TTS returned empty audios list | body={body}"
                     )
 
                 audio_bytes = base64.b64decode(audios[0])
                 logger.info(
-                    "TTS done | text_len=%d | language=%s | speaker=%s | output_bytes=%d",
-                    len(text),
-                    lang_code,
-                    speaker,
-                    len(audio_bytes),
+                    "TTS chunk %d/%d done | elapsed=%.0fms | text_len=%d | output_bytes=%d",
+                    chunk_idx, total_chunks, elapsed_ms, len(text), len(audio_bytes),
                 )
                 return audio_bytes

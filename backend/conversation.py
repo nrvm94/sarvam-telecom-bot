@@ -32,12 +32,34 @@ ESCALATION_KEYWORDS = [
 
 # Issue classification keyword map
 ISSUE_KEYWORDS = {
-    "balance_check": ["balance", "bakaya", "kitna hai", "kitna bacha"],
-    "plan_query": ["plan", "offer", "pack", "validity", "recharge", "tariff"],
-    "data_query": ["data", "internet", "speed", "4g", "5g", "mb", "gb", "net"],
-    "billing_query": ["bill", "charge", "payment", "invoice", "amount due"],
+    "balance_check": [
+        "balance", "bakaya", "kitna hai", "kitna bacha", "shillak", "kitee aahe",
+        # Devanagari (Hindi/Marathi)
+        "बैलेंस", "बकाया", "शेष", "बचा",
+    ],
+    "plan_query": [
+        "plan", "offer", "pack", "validity", "recharge", "tariff",
+        # Devanagari
+        "प्लान", "ऑफर", "पैक", "वैलिडिटी", "रिचार्ज", "जानकारी",
+    ],
+    "data_query": [
+        "data", "internet", "speed", "4g", "5g", "mb", "gb", "net", "network",
+        # Devanagari
+        "डेटा", "इंटरनेट", "स्पीड", "नेटवर्क", "नेट", "स्लो",
+    ],
+    "billing_query": [
+        "bill", "charge", "payment", "invoice", "amount due",
+        # Devanagari
+        "बिल", "चार्ज", "पेमेंट", "भुगतान", "राशि",
+    ],
     "billing_dispute": ["dispute", "wrong charge", "extra charge", "galat", "overcharge"],
     "port_request": ["port", "mnp", "number portability", "porting"],
+    # High-complexity issues that map to HIGH_PRIORITY_ISSUES in agents.py
+    "unauthorized_charge": ["unauthorized", "without permission", "bina bataye", "extra charge", "unexpected charge"],
+    "account_security": ["hacked", "hack", "security breach", "password change", "login issue", "account access"],
+    "fraud": ["fraud", "cheat", "dhoka", "scam", "fake"],
+    "legal_threat": ["legal", "court", "trai", "consumer forum", "complaint file", "case", "police"],
+    "roaming_dispute": ["roaming", "international", "abroad", "videsh", "foreign"],
 }
 
 
