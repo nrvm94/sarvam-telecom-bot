@@ -22,6 +22,60 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Chain-of-thought stripper
+# ---------------------------------------------------------------------------
+
+def _strip_cot(text: str, language: str = "en") -> str:
+    """Remove LLM chain-of-thought reasoning from the response.
+
+    sarvam-30b sometimes externalises its step-by-step thinking in the content
+    field before the final answer.  Detected by numbered markdown headers like
+    "1. **Deconstruct the Request:**".  We extract the final clean customer
+    response that appears after all reasoning steps.
+
+    Strategy:
+    - Hindi/Marathi: extract the last contiguous block of Devanagari sentences.
+    - English: take the last non-bulleted, non-numbered paragraph.
+    """
+    if not text:
+        return text
+
+    # Fast-path: if no CoT markers present, return as-is.
+    if not re.search(r'(?m)^\d+\.\s*\*\*', text):
+        return text
+
+    logger.warning("LLM CoT detected — extracting clean answer | language=%s", language)
+
+    if language in ("hi", "mr", "hi-IN", "mr-IN"):
+        # Devanagari sentences: start with a Devanagari char, end with ।/!/?.
+        # Allow mixed Devanagari/Roman (e.g. "आपका plan 999 है।")
+        sentences = re.findall(
+            r'[\u0900-\u097F][^।!?\n]{3,}[।!?]',
+            text,
+        )
+        if sentences:
+            # Take the last ≤3 sentences as the actual response.
+            clean = " ".join(s.strip() for s in sentences[-3:])
+            if len(clean) > 15:
+                return clean
+
+    # English / fallback: last non-CoT paragraph (no leading digit or *.*)
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    result: list[str] = []
+    for line in reversed(lines):
+        # Stop once we hit a CoT marker line
+        if re.match(r'^\d+\.\s*\*\*|^\*\s*\*\*|^#+\s', line):
+            break
+        if not re.match(r'^\*+\s+\*\*', line):   # skip sub-bullet headers
+            result.insert(0, line)
+    clean = " ".join(result).strip()
+    if len(clean) > 15:
+        return clean
+
+    return text  # fallback — return original rather than nothing
+
 # Map generic voice names → real Sarvam Bulbul v3 speaker IDs
 # bulbul:v3 female voices: ritu, priya, neha, pooja, simran, kavya, ishita, ...
 # bulbul:v3 male voices:   rahul, amit, aditya, rohan, ashutosh, dev, varun, ...
@@ -239,12 +293,17 @@ class SarvamClient:
         # Build multipart form — field 'file' is required by Sarvam STT
         # Model: saarika = transcription in original language (what we need)
         #        saaras  = speech-to-English translation (NOT what we need)
+        # Auto-detect format: WAV starts with b'RIFF'; everything else is WebM.
+        if audio_bytes[:4] == b'RIFF':
+            _fname, _ctype = "audio.wav", "audio/wav"
+        else:
+            _fname, _ctype = "audio.webm", "audio/webm"
         data = aiohttp.FormData()
         data.add_field(
             "file",
             audio_bytes,
-            filename="audio.webm",
-            content_type="audio/webm",
+            filename=_fname,
+            content_type=_ctype,
         )
         data.add_field("language_code", language)
         data.add_field("model", "saarika:v2.5")
@@ -385,6 +444,9 @@ class SarvamClient:
                         "LLM returned empty content | finish_reason=%s | elapsed=%.0fms | body=%s",
                         finish_reason, elapsed_ms, str(body)[:300],
                     )
+
+                # Strip chain-of-thought reasoning if the model externalised it.
+                response_text = _strip_cot(response_text, language)
 
                 logger.info(
                     "LLM done | elapsed=%.0fms | finish_reason=%s | response_len=%d | response=%r",

@@ -28,29 +28,55 @@ ESCALATION_KEYWORDS = [
     "wapas",         # return/refund
     "band karo",     # stop/cancel
     "kaam nahi",     # not working
+    # Marathi keywords
+    "takrar",        # complaint
+    "chukichi",      # wrong
+    "paisa para",    # refund
+    "band kara",     # stop/cancel
+    "chalat nahi",   # not working
+    # Marathi Devanagari
+    "तक्रार",        # complaint
+    "चुकीचे",        # wrong
+    "परत",           # refund/return
+    "बंद करा",       # stop/cancel
+    "काम करत नाही",  # not working
 ]
 
 # Issue classification keyword map
 ISSUE_KEYWORDS = {
     "balance_check": [
         "balance", "bakaya", "kitna hai", "kitna bacha", "shillak", "kitee aahe",
-        # Devanagari (Hindi/Marathi)
-        "बैलेंस", "बकाया", "शेष", "बचा",
+        "kiti aahe", "khate", "account",
+        # Devanagari (Hindi)
+        "बैलेंस", "बकाया", "शेष", "बचा", "बैलन्स",
+        # Devanagari (Marathi)
+        "शिल्लक", "किती", "खाते",
     ],
     "plan_query": [
-        "plan", "offer", "pack", "validity", "recharge", "tariff",
-        # Devanagari
-        "प्लान", "ऑफर", "पैक", "वैलिडिटी", "रिचार्ज", "जानकारी",
+        "plan", "offer", "pack", "validity", "recharge", "tariff", "detail", "details",
+        "yojana", "mahiti", "saang", "current plan", "my plan",
+        # Devanagari (Hindi) — "जानकारी" (info) intentionally omitted; too generic.
+        # "अकाउंट" (account) is in balance_check (Latin "account") so not repeated here.
+        "प्लान", "ऑफर", "पैक", "वैलिडिटी", "रिचार्ज",
+        "डिटेल", "डिटेल्स", "करंट", "विवरण",
+        # Devanagari (Marathi)
+        "योजना", "माहिती", "सांग", "तपशील",
     ],
     "data_query": [
         "data", "internet", "speed", "4g", "5g", "mb", "gb", "net", "network",
-        # Devanagari
-        "डेटा", "इंटरनेट", "स्पीड", "नेटवर्क", "नेट", "स्लो",
+        "milel", "aahe ka", "data left", "data remaining", "data bacha",
+        # Devanagari (Hindi)
+        "डेटा", "इंटरनेट", "स्पीड", "नेटवर्क", "नेट", "स्लो", "बचा डेटा",
+        # Devanagari (Marathi)
+        "नेटवर्क", "स्पीड", "डेटा",
     ],
     "billing_query": [
         "bill", "charge", "payment", "invoice", "amount due",
-        # Devanagari
-        "बिल", "चार्ज", "पेमेंट", "भुगतान", "राशि",
+        "deu", "bhar",
+        # Devanagari (Hindi)
+        "बिल", "चार्ज", "पेमेंट", "भुगतान", "राशि", "बिल भरना", "बिल दिखाओ",
+        # Devanagari (Marathi)
+        "देणे", "भरणे", "रक्कम", "बिल",
     ],
     "billing_dispute": ["dispute", "wrong charge", "extra charge", "galat", "overcharge"],
     "port_request": ["port", "mnp", "number portability", "porting"],

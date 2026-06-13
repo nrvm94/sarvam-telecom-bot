@@ -12,12 +12,27 @@ function nowISO() {
   return new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-// Convert base64 to ArrayBuffer for Web Audio API
 function base64ToArrayBuffer(b64) {
   const binary = atob(b64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes.buffer
+}
+
+/**
+ * Downsample a Float32Array from sourceSampleRate → 16000 and convert to Int16.
+ * Uses simple nearest-neighbour decimation (fine for speech capture).
+ */
+function float32ToInt16At16k(float32Array, sourceSampleRate) {
+  const ratio = sourceSampleRate / 16000
+  const outLen = Math.floor(float32Array.length / ratio)
+  const out = new Int16Array(outLen)
+  for (let i = 0; i < outLen; i++) {
+    const src = float32Array[Math.floor(i * ratio)]
+    const clamped = Math.max(-1, Math.min(1, src))
+    out[i] = clamped < 0 ? clamped * 32768 : clamped * 32767
+  }
+  return out
 }
 
 // ---- Status dot -------------------------------------------------------------
@@ -28,6 +43,7 @@ function StatusDot({ status }) {
     active:     { color: 'bg-green-400',  label: 'Active',     pulse: false },
     recording:  { color: 'bg-red-500',    label: 'Recording',  pulse: true  },
     processing: { color: 'bg-yellow-400', label: 'Processing', pulse: false },
+    speaking:   { color: 'bg-blue-400',   label: 'Bot Speaking', pulse: true },
   }
   const { color, label, pulse } = config[status] || config.idle
   return (
@@ -38,14 +54,66 @@ function StatusDot({ status }) {
   )
 }
 
+// ---- Audio queue for progressive playback -----------------------------------
+
+class AudioQueue {
+  constructor() {
+    this.ctx = null
+    this.nextPlayTime = 0
+    this.playing = false
+  }
+
+  async init() {
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)()
+    }
+    if (this.ctx.state === 'suspended') {
+      await this.ctx.resume()
+    }
+    return this.ctx
+  }
+
+  async enqueue(arrayBuffer) {
+    const ctx = await this.init()
+    try {
+      const decoded = await ctx.decodeAudioData(arrayBuffer)
+      const source = ctx.createBufferSource()
+      source.buffer = decoded
+      source.connect(ctx.destination)
+
+      const now = ctx.currentTime
+      const startAt = Math.max(now, this.nextPlayTime)
+      source.start(startAt)
+      this.nextPlayTime = startAt + decoded.duration
+      this.playing = true
+      source.onended = () => {
+        if (ctx.currentTime >= this.nextPlayTime - 0.05) {
+          this.playing = false
+          this.nextPlayTime = 0
+        }
+      }
+    } catch (e) {
+      console.warn('Audio decode error:', e)
+    }
+  }
+
+  stop() {
+    if (this.ctx) {
+      this.ctx.close().catch(() => {})
+      this.ctx = null
+    }
+    this.nextPlayTime = 0
+    this.playing = false
+  }
+}
+
 // ---- Main component ---------------------------------------------------------
 
 export default function VoiceBot() {
   // State
   const [callId, setCallId]               = useState(null)
   const [isCallActive, setIsCallActive]   = useState(false)
-  const [isRecording, setIsRecording]     = useState(false)
-  const [isProcessing, setIsProcessing]   = useState(false)
+  const [botStatus, setBotStatus]         = useState('idle') // idle/active/recording/processing/speaking
   const [transcription, setTranscription] = useState('')
   const [botResponse, setBotResponse]     = useState('')
   const [conversation, setConversation]   = useState([])
@@ -58,30 +126,22 @@ export default function VoiceBot() {
   const [customerName, setCustomerName]   = useState('')
   const [customerFound, setCustomerFound] = useState(false)
   const [lookedUpPhone, setLookedUpPhone] = useState('')
-  // Language is auto-detected per turn by the backend; always start with hi-IN STT
-  const language = 'hi'
 
-  // Refs (not causing re-renders)
-  const audioChunksRef    = useRef([])
-  const mediaRecorderRef  = useRef(null)
+  // Refs
+  const callIdRef         = useRef(null)
   const callTimerRef      = useRef(null)
-  const conversationEndRef = useRef(null)
   const errorTimerRef     = useRef(null)
-  // VAD / audio refs
-  const audioContextRef   = useRef(null)
-  const analyserRef       = useRef(null)
-  const vadIntervalRef    = useRef(null)
-  const silenceStartRef   = useRef(null)
-  // Continuous listening refs
-  const playingAudioRef   = useRef(null)   // current bot audio { source, ctx }
-  const micStreamRef      = useRef(null)   // persistent mic MediaStream
-  const isRecordingRef    = useRef(false)  // recording in progress (ref, not state)
-  const isProcessingRef   = useRef(false)  // waiting for API response
-  const speechStartRef    = useRef(null)   // voice onset debounce timestamp
-  const callIdRef         = useRef(null)   // mirror of callId state for closures
-  const languageRef       = useRef('hi')   // mirrors selectedLang; switches per-turn from detected language
+  const conversationEndRef = useRef(null)
+  // WebSocket + PCM capture refs
+  const wsRef             = useRef(null)
+  const audioCtxRef       = useRef(null)      // AudioContext for PCM capture
+  const processorNodeRef  = useRef(null)       // ScriptProcessorNode
+  const micStreamRef      = useRef(null)       // MediaStream
+  const audioQueueRef     = useRef(new AudioQueue())
+  const isBotSpeakingRef  = useRef(false)
+  const pendingTurnRef    = useRef(null)       // { transcript, timestamp }
 
-  // Sync state → refs
+  // Sync callId state → ref
   useEffect(() => { callIdRef.current = callId }, [callId])
 
   // Auto-scroll conversation
@@ -89,7 +149,7 @@ export default function VoiceBot() {
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [conversation])
 
-  // Auto-dismiss errors after 6 seconds
+  // Auto-dismiss errors
   useEffect(() => {
     if (error) {
       clearTimeout(errorTimerRef.current)
@@ -100,241 +160,157 @@ export default function VoiceBot() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      clearInterval(callTimerRef.current)
-      clearTimeout(errorTimerRef.current)
-      clearInterval(vadIntervalRef.current)
-      if (audioContextRef.current) audioContextRef.current.close()
-      if (micStreamRef.current) micStreamRef.current.getTracks().forEach(t => t.stop())
+      _teardown()
     }
   }, [])
 
-  // Derived status for UI
-  const uiStatus = isRecording ? 'recording' : isProcessing ? 'processing' : isCallActive ? 'active' : 'idle'
+  // ---- Low-level teardown --------------------------------------------------
 
-  // ---- processAudio — stable (uses refs, no state deps) -------------------
+  function _teardown() {
+    clearInterval(callTimerRef.current)
+    clearTimeout(errorTimerRef.current)
 
-  const processAudio = useCallback(async () => {
-    const chunks = audioChunksRef.current
-    if (!chunks.length) {
-      isProcessingRef.current = false
-      setIsProcessing(false)
-      setStatusMsg('Listening...')
-      return
+    // Stop ScriptProcessorNode
+    if (processorNodeRef.current) {
+      try { processorNodeRef.current.disconnect() } catch (_) {}
+      processorNodeRef.current = null
     }
-
-    const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
-    const reader = new FileReader()
-    reader.readAsDataURL(blob)
-    reader.onloadend = async () => {
-      const b64 = reader.result.split(',')[1]
-      try {
-        const res = await fetch('/voice/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            audio_base64: b64,
-            call_id: callIdRef.current,
-            language: languageRef.current,
-          }),
-        })
-
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}))
-          throw new Error(errBody.detail || `Server error ${res.status}`)
-        }
-
-        const data = await res.json()
-
-        setTranscription(data.transcription)
-        setBotResponse(data.response)
-        setIsProcessing(false)
-        isProcessingRef.current = false
-        setStatusMsg('Listening...')
-        audioChunksRef.current = []
-
-        // Track detected language so next turn uses correct STT language
-        if (data.language) languageRef.current = data.language
-
-        const ts = nowISO()
-        setConversation((prev) => [
-          ...prev,
-          { role: 'user', text: data.transcription, timestamp: ts },
-          { role: 'bot',  text: data.response,      timestamp: ts },
-        ])
-
-        if (data.audio_base64) {
-          playAudio(data.audio_base64)
-        }
-
-        if (data.escalate) {
-          setEscalated(true)
-          const routing = data.routing ? data.routing.replace('_', ' ') : 'support team'
-          const ticket = data.ticket_id || ''
-          setTicketMessage(
-            `Escalated to ${routing}${ticket ? ` | Ticket: ${ticket}` : ''} | Agent will call within 2 hours`
-          )
-        }
-      } catch (err) {
-        setError(`Processing failed: ${err.message}`)
-        setStatusMsg('Listening...')
-        setIsProcessing(false)
-        isProcessingRef.current = false
-        audioChunksRef.current = []
-      }
+    // Stop AudioContext (capture)
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {})
+      audioCtxRef.current = null
     }
-  }, [])  // stable — callId and language accessed via refs
-
-  // ---- playAudio — play bot response audio --------------------------------
-
-  const playAudio = useCallback(async (b64Audio) => {
-    try {
-      const arrayBuffer = base64ToArrayBuffer(b64Audio)
-      const ctx = new (window.AudioContext || window.webkitAudioContext)()
-      const decoded = await ctx.decodeAudioData(arrayBuffer)
-      const source = ctx.createBufferSource()
-      source.buffer = decoded
-      source.connect(ctx.destination)
-      playingAudioRef.current = { source, ctx }
-      setStatusMsg('Bot is speaking...')
-      source.start(0)
-      source.onended = () => {
-        playingAudioRef.current = null
-        ctx.close()
-        setStatusMsg('Listening...')
-      }
-    } catch (err) {
-      console.warn('Audio playback error:', err)
-      playingAudioRef.current = null
-    }
-  }, [])
-
-  // ---- startListening — continuous VAD loop --------------------------------
-
-  const startListening = useCallback(async () => {
-    // 1. Request mic once
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
-    })
-    micStreamRef.current = stream
-
-    // 2. Set up AudioContext + AnalyserNode for VAD
-    const vadCtx = new (window.AudioContext || window.webkitAudioContext)()
-    const analyser = vadCtx.createAnalyser()
-    analyser.fftSize = 512
-    vadCtx.createMediaStreamSource(stream).connect(analyser)
-    audioContextRef.current = vadCtx
-    analyserRef.current = analyser
-
-    const data = new Uint8Array(analyser.frequencyBinCount)
-    const SPEECH_THRESHOLD = 5   // RMS > 5 → voice detected
-    const SILENCE_THRESHOLD = 3  // RMS < 3 → silence
-
-    // 3. VAD interval — runs every 150ms throughout entire call
-    vadIntervalRef.current = setInterval(() => {
-      if (!analyserRef.current) return
-      analyserRef.current.getByteTimeDomainData(data)
-      let sum = 0
-      for (let i = 0; i < data.length; i++) {
-        const v = (data[i] - 128) / 128
-        sum += v * v
-      }
-      const rms = Math.sqrt(sum / data.length) * 100
-
-      // --- Interrupt bot audio if user speaks ---
-      if (playingAudioRef.current && rms > SPEECH_THRESHOLD) {
-        if (!speechStartRef.current) {
-          speechStartRef.current = Date.now()
-        } else if (Date.now() - speechStartRef.current > 200) {
-          // Confirmed speech during bot playback → interrupt
-          try { playingAudioRef.current.source.stop() } catch (_) {}
-          try { playingAudioRef.current.ctx.close() } catch (_) {}
-          playingAudioRef.current = null
-          speechStartRef.current = null
-          setStatusMsg('Listening...')
-        }
-        return  // VAD will pick up speech on next cycle
-      }
-
-      // --- LISTENING state: detect onset of speech ---
-      if (!isRecordingRef.current && !isProcessingRef.current && !playingAudioRef.current) {
-        if (rms > SPEECH_THRESHOLD) {
-          if (!speechStartRef.current) {
-            speechStartRef.current = Date.now()
-          } else if (Date.now() - speechStartRef.current > 200) {
-            // Confirmed speech → start recording
-            speechStartRef.current = null
-            silenceStartRef.current = null
-            audioChunksRef.current = []
-
-            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-              ? 'audio/webm;codecs=opus'
-              : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
-            const recorder = new MediaRecorder(micStreamRef.current, mimeType ? { mimeType } : {})
-            mediaRecorderRef.current = recorder
-            recorder.ondataavailable = (e) => {
-              if (e.data.size > 0) audioChunksRef.current.push(e.data)
-            }
-            recorder.onstop = () => processAudio()
-            recorder.start(100)
-            isRecordingRef.current = true
-            setIsRecording(true)
-            setStatusMsg('Recording...')
-          }
-        } else {
-          speechStartRef.current = null
-        }
-      }
-
-      // --- RECORDING state: detect end of speech (1.5s silence) ---
-      if (isRecordingRef.current) {
-        if (rms < SILENCE_THRESHOLD) {
-          if (!silenceStartRef.current) {
-            silenceStartRef.current = Date.now()
-          } else if (Date.now() - silenceStartRef.current > 1500) {
-            // Silence confirmed → stop recording
-            silenceStartRef.current = null
-            isRecordingRef.current = false
-            isProcessingRef.current = true
-            setIsRecording(false)
-            setIsProcessing(true)
-            setStatusMsg('Processing...')
-            if (mediaRecorderRef.current?.state === 'recording') {
-              mediaRecorderRef.current.stop()
-            }
-          }
-        } else {
-          silenceStartRef.current = null
-        }
-      }
-    }, 150)
-  }, [processAudio])
-
-  // ---- stopListening — tear down mic + VAD --------------------------------
-
-  const stopListening = useCallback(() => {
-    clearInterval(vadIntervalRef.current)
-    vadIntervalRef.current = null
-    analyserRef.current = null
-    speechStartRef.current = null
-    silenceStartRef.current = null
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop()
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close()
-      audioContextRef.current = null
-    }
+    // Stop mic
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(t => t.stop())
       micStreamRef.current = null
     }
-    isRecordingRef.current = false
-    isProcessingRef.current = false
-    setIsRecording(false)
-    setIsProcessing(false)
+    // Stop playback queue
+    audioQueueRef.current.stop()
+    audioQueueRef.current = new AudioQueue()
+    // Close WebSocket
+    if (wsRef.current) {
+      wsRef.current.onclose = null
+      wsRef.current.close()
+      wsRef.current = null
+    }
+  }
+
+  // ---- WebSocket message handler ------------------------------------------
+
+  const handleWsMessage = useCallback(async (event) => {
+    if (typeof event.data !== 'string') return
+    let msg
+    try { msg = JSON.parse(event.data) } catch { return }
+
+    if (msg.type === 'transcript') {
+      setTranscription(msg.text)
+      setBotStatus('processing')
+      setStatusMsg('Bot is thinking...')
+      pendingTurnRef.current = { transcript: msg.text, timestamp: nowISO() }
+    }
+
+    else if (msg.type === 'response') {
+      setBotResponse(msg.text)
+      if (msg.escalate) {
+        setEscalated(true)
+        const routing = msg.routing ? msg.routing.replace(/_/g, ' ') : 'support team'
+        const ticket = msg.ticket_id || ''
+        setTicketMessage(
+          `Escalated to ${routing}${ticket ? ` | Ticket: ${ticket}` : ''} | Agent will call within 2 hours`
+        )
+      }
+    }
+
+    else if (msg.type === 'audio_chunk') {
+      if (!isBotSpeakingRef.current) {
+        isBotSpeakingRef.current = true
+        setBotStatus('speaking')
+        setStatusMsg('Bot is speaking...')
+
+        // Commit pending turn to conversation
+        const turn = pendingTurnRef.current
+        if (turn) {
+          setConversation(prev => [
+            ...prev,
+            { role: 'user', text: turn.transcript, timestamp: turn.timestamp },
+          ])
+          pendingTurnRef.current = null
+        }
+      }
+
+      // Enqueue audio chunk for progressive playback
+      const arrayBuffer = base64ToArrayBuffer(msg.audio_base64)
+      await audioQueueRef.current.enqueue(arrayBuffer)
+
+      if (msg.is_last) {
+        // Add bot response to conversation after last chunk starts queuing
+        const ts = nowISO()
+        const responseText = botResponse
+        setConversation(prev => [
+          ...prev,
+          { role: 'bot', text: responseText, timestamp: ts },
+        ])
+
+        // Wait for audio queue to drain, then switch back to listening
+        const checkDone = setInterval(() => {
+          if (!audioQueueRef.current.playing) {
+            clearInterval(checkDone)
+            isBotSpeakingRef.current = false
+            setBotStatus('active')
+            setStatusMsg('Listening...')
+          }
+        }, 200)
+      }
+    }
+
+    else if (msg.type === 'error') {
+      setError(`Pipeline error: ${msg.message}`)
+      setBotStatus('active')
+      setStatusMsg('Listening...')
+    }
+  }, [botResponse])
+
+  // ---- Start PCM capture via ScriptProcessorNode --------------------------
+
+  const startPcmCapture = useCallback(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+    })
+    micStreamRef.current = stream
+
+    // Try 16 kHz; if the browser uses a different rate we downsample in onaudioprocess
+    let ctx
+    try {
+      ctx = new AudioContext({ sampleRate: 16000 })
+    } catch {
+      ctx = new (window.AudioContext || window.webkitAudioContext)()
+    }
+    audioCtxRef.current = ctx
+    if (ctx.state === 'suspended') await ctx.resume()
+
+    const source = ctx.createMediaStreamSource(stream)
+
+    // bufferSize 2048 = 128 ms at 16 kHz (good balance of latency vs overhead)
+    const bufferSize = 2048
+    const proc = ctx.createScriptProcessor(bufferSize, 1, 1)
+    processorNodeRef.current = proc
+
+    proc.onaudioprocess = (e) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+
+      const inputData = e.inputBuffer.getChannelData(0)  // Float32 at ctx.sampleRate
+      const pcm16 = float32ToInt16At16k(inputData, ctx.sampleRate)
+      ws.send(pcm16.buffer)
+    }
+
+    source.connect(proc)
+    // Must connect to destination or some browsers skip onaudioprocess
+    proc.connect(ctx.destination)
   }, [])
 
-  // ---- startCall ----------------------------------------------------------
+  // ---- Start call ----------------------------------------------------------
 
   const startCall = useCallback(async () => {
     setError('')
@@ -349,30 +325,74 @@ export default function VoiceBot() {
 
     try {
       setStatusMsg('Connecting...')
+      setBotStatus('idle')
+
+      // 1. HTTP POST /voice/start — get call_id + greeting
       const res = await fetch('/voice/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_name: '',
           customer_phone: customerPhone,
-          language: language,
+          customer_name: '',
+          language: 'hi',
         }),
       })
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const data = await res.json()
 
       setCallId(data.call_id)
+      callIdRef.current = data.call_id
       setIsCallActive(true)
       setCustomerName(data.customer_name || '')
       setCustomerFound(!!data.customer_found)
       setLookedUpPhone(data.looked_up_phone || '')
 
-      // Play greeting audio (non-blocking)
+      // Play greeting audio
       if (data.greeting_audio_base64) {
-        playAudio(data.greeting_audio_base64)
+        const buf = base64ToArrayBuffer(data.greeting_audio_base64)
+        isBotSpeakingRef.current = true
+        setBotStatus('speaking')
+        setStatusMsg('Bot is speaking...')
+        await audioQueueRef.current.enqueue(buf)
+        // Wait for greeting to finish
+        await new Promise(resolve => {
+          const check = setInterval(() => {
+            if (!audioQueueRef.current.playing) {
+              clearInterval(check)
+              resolve()
+            }
+          }, 200)
+        })
+        isBotSpeakingRef.current = false
       }
 
-      // Start timer
+      // 2. Open WebSocket to the real-time pipeline
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const wsUrl = `${wsProtocol}://${window.location.host}/ws/voice/${data.call_id}`
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+
+      ws.onmessage = handleWsMessage
+      ws.onerror = (e) => {
+        setError('WebSocket error — check backend logs')
+        console.error('WS error', e)
+      }
+      ws.onclose = () => {
+        if (isCallActive) {
+          setBotStatus('idle')
+          setStatusMsg('Connection closed')
+        }
+      }
+
+      await new Promise((resolve, reject) => {
+        ws.onopen = resolve
+        ws.onerror = reject
+      })
+
+      // 3. Start PCM capture
+      await startPcmCapture()
+
+      // 4. Start call timer
       clearInterval(callTimerRef.current)
       let elapsed = 0
       callTimerRef.current = setInterval(() => {
@@ -380,52 +400,39 @@ export default function VoiceBot() {
         setCallDuration(elapsed)
       }, 1000)
 
-      // Start continuous VAD listening
-      await startListening()
+      setBotStatus('active')
       setStatusMsg('Listening...')
+
     } catch (err) {
       setError(`Failed to start call: ${err.message}`)
       setStatusMsg('Click "Start Call" to begin')
+      _teardown()
     }
-  }, [customerPhone, playAudio, startListening])
+  }, [customerPhone, handleWsMessage, startPcmCapture])
 
-  // ---- endCall ------------------------------------------------------------
+  // ---- End call ------------------------------------------------------------
 
   const endCall = useCallback(async () => {
-    if (!callId) return
+    const cid = callIdRef.current
+    if (!cid) return
 
-    // Stop bot audio immediately
-    if (playingAudioRef.current) {
-      try { playingAudioRef.current.source.stop() } catch (_) {}
-      try { playingAudioRef.current.ctx.close() } catch (_) {}
-      playingAudioRef.current = null
-    }
-
-    // Stop mic + VAD
-    stopListening()
-
-    clearInterval(callTimerRef.current)
+    _teardown()
 
     try {
       await fetch('/voice/end', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ call_id: callId, duration_seconds: callDuration }),
+        body: JSON.stringify({ call_id: cid, duration_seconds: callDuration }),
       })
-    } catch (err) {
-      console.warn('End call API error:', err)
+    } catch (e) {
+      console.warn('End call error:', e)
     }
 
-    // Reset all state
-    languageRef.current = 'hi'
-    setConversation([])
-    setLookedUpPhone('')
-    setCustomerPhone('9876543210')
-    setError('')
+    // Reset state
     setCallId(null)
+    callIdRef.current = null
     setIsCallActive(false)
-    setIsRecording(false)
-    setIsProcessing(false)
+    setBotStatus('idle')
     setTranscription('')
     setBotResponse('')
     setEscalated(false)
@@ -433,10 +440,15 @@ export default function VoiceBot() {
     setCallDuration(0)
     setCustomerName('')
     setCustomerFound(false)
+    setLookedUpPhone('')
+    setError('')
     setStatusMsg('Call ended — click "Start Call" to begin a new call')
-  }, [callId, callDuration, stopListening])
+  }, [callDuration])
 
   // ---- Render ---------------------------------------------------------------
+  const isProcessing = botStatus === 'processing'
+  const isSpeaking   = botStatus === 'speaking'
+
   return (
     <div className="bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
 
@@ -461,7 +473,7 @@ export default function VoiceBot() {
 
       {/* ── Status bar ──────────────────────────────────────────────────── */}
       <div className="bg-gray-750 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
-        <StatusDot status={uiStatus} />
+        <StatusDot status={botStatus} />
         <div className="flex items-center gap-4">
           {isCallActive && (
             <span className="text-green-400 font-mono text-sm">
@@ -477,19 +489,19 @@ export default function VoiceBot() {
       {/* ── Main control area ───────────────────────────────────────────── */}
       <div className="px-6 py-8 flex flex-col items-center gap-6">
 
-        {/* Status indicator (replaces push-to-talk mic button) */}
+        {/* Status icon */}
         <div className="w-20 h-20 rounded-full flex items-center justify-center bg-gray-700 shadow-lg">
           <span className="text-3xl">
-            {isProcessing ? '⏳' : isRecording ? '🎙️' : isCallActive ? '👂' : '🎤'}
+            {isSpeaking ? '🔊' : isProcessing ? '⏳' : isCallActive ? '👂' : '🎤'}
           </span>
         </div>
 
-        {/* Instruction / status text */}
+        {/* Status text */}
         <p className="text-gray-400 text-sm text-center min-h-5">
           {statusMsg}
         </p>
 
-        {/* Pre-call: phone input + language selector. In-call: customer badge */}
+        {/* Pre-call: phone input. In-call: customer badge */}
         {!isCallActive ? (
           <div className="w-full max-w-xs">
             <input
@@ -608,8 +620,8 @@ export default function VoiceBot() {
             <p className="font-semibold text-gray-300 mb-2">How to use:</p>
             <p>1. Enter your Airtel number</p>
             <p>2. Click <strong className="text-green-400">Start Call</strong></p>
-            <p>3. Speak naturally in Hindi, English, or Marathi — the bot listens automatically</p>
-            <p>4. Pause for 1.5 seconds — the bot will respond in your language</p>
+            <p>3. Speak naturally in Hindi, English, or Marathi — bot listens automatically</p>
+            <p>4. Pause briefly — bot responds in your language</p>
             <p>5. Click <strong className="text-red-400">End Call</strong> when done</p>
           </div>
         </div>

@@ -129,6 +129,33 @@ CONVERSATIONS = [
             ("मेरा बिल कितना है",                  "hi-IN", "hi", "Turn3: Back to Hindi"),
         ],
     },
+    {
+        "name": "T6 — Marathi-only (default hi → auto-switch mr)",
+        "phone": "9876543210",
+        "turns": [
+            ("माझा balance किती आहे",  "mr-IN", "mr", "MR balance query"),
+            ("माझे plan काय आहे",      "mr-IN", "mr", "MR plan query"),
+            ("माझे bill किती झाले",    "mr-IN", "mr", "MR billing query"),
+        ],
+    },
+    {
+        "name": "T7 — Language switch: Hindi → Marathi",
+        "phone": "9876543210",
+        "turns": [
+            ("मेरा बैलेंस कितना है",    "hi-IN", "hi", "Turn1: Hindi"),
+            ("माझे plan काय आहे",       "mr-IN", "mr", "Turn2: Marathi (send=hi)"),
+            ("माझे bill किती झाले",     "mr-IN", "mr", "Turn3: Marathi (send=mr)"),
+        ],
+    },
+    {
+        "name": "T8 — Language switch: Marathi → English",
+        "phone": "9876543210",
+        "turns": [
+            ("माझा balance किती आहे",           "mr-IN", "mr", "Turn1: Marathi (send=hi)"),
+            ("what is my current plan",          "en-IN", "en", "Turn2: English (send=mr)"),
+            ("how much data is left in my account", "en-IN", "en", "Turn3: English (send=en)"),
+        ],
+    },
 ]
 
 # -- Backend management --------------------------------------------------------

@@ -148,12 +148,11 @@ def _fmt_date(iso: str) -> str:
 
 def build_account_answer(issue_type: str, customer: dict, language: str) -> str | None:
     """Return a complete, speakable account answer, or None if not account-backed."""
-    if language == "mr":
-        return None  # fall through to LLM, which has the Marathi system prompt
     plan = customer.get("plan") or {}
     if not plan:
         return None
     hi = language == "hi"
+    mr = language == "mr"
     postpaid = "monthly_data" in plan
 
     # ---- PLAN DETAILS ----
@@ -163,10 +162,15 @@ def build_account_answer(issue_type: str, customer: dict, language: str) -> str 
             used = plan.get("used_data_gb", 0)
             fiveg_en = " It includes 5G access." if plan.get("is_5g") else ""
             fiveg_hi = " इसमें 5G भी शामिल है।" if plan.get("is_5g") else ""
+            fiveg_mr = " त्यात 5G सुद्धा आहे." if plan.get("is_5g") else ""
             if hi:
                 return (f"आप {plan['name']} plan पर हैं, जिसमें {total} GB monthly data और "
                         f"{plan.get('voice', '')} calling है।{fiveg_hi} "
                         f"अभी तक आपने {used} GB use किया है और plan {_fmt_date(plan.get('validity', ''))} तक valid है।")
+            if mr:
+                return (f"तुम्ही {plan['name']} plan वर आहात, ज्यात {total} GB monthly data आणि "
+                        f"{plan.get('voice', '')} calling आहे.{fiveg_mr} "
+                        f"आतापर्यंत तुम्ही {used} GB वापरले आहे आणि plan {_fmt_date(plan.get('validity', ''))} पर्यंत valid आहे.")
             return (f"You're on the {plan['name']} plan with {total} GB of monthly data and "
                     f"{plan.get('voice', '')} calling.{fiveg_en} "
                     f"You've used {used} GB so far, and it's valid until {_fmt_date(plan.get('validity', ''))}.")
@@ -174,6 +178,9 @@ def build_account_answer(issue_type: str, customer: dict, language: str) -> str 
             if hi:
                 return (f"आप {plan['name']} plan पर हैं, जिसमें रोज़ाना {plan.get('data_per_day', '')} data और "
                         f"{plan.get('voice', '')} calling है। यह {_fmt_date(plan.get('validity_ends', ''))} तक valid है।")
+            if mr:
+                return (f"तुम्ही {plan['name']} plan वर आहात, ज्यात दररोज {plan.get('data_per_day', '')} data आणि "
+                        f"{plan.get('voice', '')} calling आहे. हे {_fmt_date(plan.get('validity_ends', ''))} पर्यंत valid आहे.")
             return (f"You're on the {plan['name']} plan with {plan.get('data_per_day', '')} of data per day and "
                     f"{plan.get('voice', '')} calling. It's valid until {_fmt_date(plan.get('validity_ends', ''))}.")
 
@@ -186,6 +193,9 @@ def build_account_answer(issue_type: str, customer: dict, language: str) -> str 
             if hi:
                 return (f"आपके plan में {total} GB monthly data है। आपने {used} GB use किया है, "
                         f"लगभग {remaining} GB बचा है। Validity {_fmt_date(plan.get('validity', ''))} तक है।")
+            if mr:
+                return (f"तुमच्या plan मध्ये {total} GB monthly data आहे. तुम्ही {used} GB वापरले आहे, "
+                        f"अंदाजे {remaining} GB शिल्लक आहे. Validity {_fmt_date(plan.get('validity', ''))} पर्यंत आहे.")
             return (f"Your plan includes {total} GB of monthly data. You've used {used} GB, "
                     f"so about {remaining} GB is remaining, valid until {_fmt_date(plan.get('validity', ''))}.")
         else:  # prepaid
@@ -193,6 +203,9 @@ def build_account_answer(issue_type: str, customer: dict, language: str) -> str 
             if hi:
                 return (f"आपको रोज़ाना {plan.get('data_per_day', '')} data मिलता है। आज आपने {used} GB use किया है। "
                         f"Pack {_fmt_date(plan.get('validity_ends', ''))} तक valid है।")
+            if mr:
+                return (f"तुम्हाला दररोज {plan.get('data_per_day', '')} data मिळतो. आज तुम्ही {used} GB वापरले आहे. "
+                        f"Pack {_fmt_date(plan.get('validity_ends', ''))} पर्यंत valid आहे.")
             return (f"You get {plan.get('data_per_day', '')} of data per day. Today you've used {used} GB. "
                     f"Your pack is valid until {_fmt_date(plan.get('validity_ends', ''))}.")
 
@@ -206,26 +219,42 @@ def build_account_answer(issue_type: str, customer: dict, language: str) -> str 
             if hi:
                 return (f"आप prepaid plan पर हैं, इसलिए कोई monthly bill नहीं है। "
                         f"आपका last recharge {rc.get('amount', 0)} रुपये का था, {_fmt_date(rc.get('date', ''))} को।")
+            if mr:
+                return (f"तुम्ही prepaid plan वर आहात, त्यामुळे monthly bill नाही. "
+                        f"तुमचा शेवटचा recharge {rc.get('amount', 0)} रुपये होता, {_fmt_date(rc.get('date', ''))} रोजी.")
             return (f"You're on a prepaid plan, so there's no monthly bill. "
                     f"Your last recharge was {rc.get('amount', 0)} rupees on {_fmt_date(rc.get('date', ''))}.")
         amt = bill.get("amount", 0)
         status_hi = "अभी तक unpaid है" if not bill.get("paid") else "paid हो चुका है"
         status_en = "currently unpaid" if not bill.get("paid") else "already paid"
+        status_mr = "अद्याप unpaid आहे" if not bill.get("paid") else "paid झाले आहे"
         bd = bill.get("breakdown", {})
-        seg_en, seg_hi = [], []
+        seg_en, seg_hi, seg_mr = [], [], []
         if bd.get("base_plan"):
-            seg_en.append(f"base plan {bd['base_plan']} rupees"); seg_hi.append(f"base plan {bd['base_plan']} रुपये")
+            seg_en.append(f"base plan {bd['base_plan']} rupees")
+            seg_hi.append(f"base plan {bd['base_plan']} रुपये")
+            seg_mr.append(f"base plan {bd['base_plan']} रुपये")
         if bd.get("add_ons"):
-            seg_en.append(f"add-ons {bd['add_ons']} rupees"); seg_hi.append(f"add-ons {bd['add_ons']} रुपये")
+            seg_en.append(f"add-ons {bd['add_ons']} rupees")
+            seg_hi.append(f"add-ons {bd['add_ons']} रुपये")
+            seg_mr.append(f"add-ons {bd['add_ons']} रुपये")
         if bd.get("late_fee"):
-            seg_en.append(f"a late fee of {bd['late_fee']} rupees"); seg_hi.append(f"late fee {bd['late_fee']} रुपये")
+            seg_en.append(f"a late fee of {bd['late_fee']} rupees")
+            seg_hi.append(f"late fee {bd['late_fee']} रुपये")
+            seg_mr.append(f"late fee {bd['late_fee']} रुपये")
         if bd.get("roaming"):
-            seg_en.append(f"roaming {bd['roaming']} rupees"); seg_hi.append(f"roaming {bd['roaming']} रुपये")
+            seg_en.append(f"roaming {bd['roaming']} rupees")
+            seg_hi.append(f"roaming {bd['roaming']} रुपये")
+            seg_mr.append(f"roaming {bd['roaming']} रुपये")
         dispute_en = f" A dispute is on record: {bill['dispute_reason']}." if bill.get("dispute_raised") else ""
         dispute_hi = f" एक dispute भी record पर है: {bill['dispute_reason']}।" if bill.get("dispute_raised") else ""
+        dispute_mr = f" एक dispute नोंद आहे: {bill['dispute_reason']}." if bill.get("dispute_raised") else ""
         if hi:
             return (f"आपका latest bill {amt} रुपये है, due date {_fmt_date(bill.get('due_date', ''))}, और यह {status_hi}। "
                     f"इसमें {', '.join(seg_hi)} शामिल हैं।{dispute_hi}")
+        if mr:
+            return (f"तुमचे latest bill {amt} रुपये आहे, due date {_fmt_date(bill.get('due_date', ''))}, आणि ते {status_mr}. "
+                    f"त्यात {', '.join(seg_mr)} समाविष्ट आहे.{dispute_mr}")
         return (f"Your latest bill is {amt} rupees, due on {_fmt_date(bill.get('due_date', ''))}, and it's {status_en}. "
                 f"It includes {', '.join(seg_en)}.{dispute_en}")
 
@@ -412,29 +441,31 @@ class QueryResolverAgent:
 
             if lang == "hi":
                 system_prompt = (
+                    "STRICT: Output ONLY the final customer response — no reasoning steps, no numbered analysis, "
+                    "no chain-of-thought, no bullet points explaining your thinking. "
+                    "Start your reply directly with the first word of your answer to the customer. "
                     "आप Airtel की एक महिला customer support agent हैं। "
                     "हमेशा शुद्ध हिंदी में देवनागरी लिपि में जवाब दें — Roman/Hinglish में नहीं। "
-                    "स्त्रीलिंग क्रियापद उपयोग करें (सकती हूँ, करती हूँ, बताती हूँ, रहूँगी, करूँगी आदि)। "
-                    "नीचे दिया गया CUSTOMER ACCOUNT DATA authentic और verified है — सीधे इसी data से जवाब दें। "
-                    "Customer को कभी app, website, store या 121 पर जाने को न कहें। "
-                    "2-3 sentences में सीधा जवाब दें।"
+                    "नीचे दिया गया CUSTOMER ACCOUNT DATA authentic है — सीधे इसी data से जवाब दें। "
+                    "Customer को कभी app, website, store या 121 पर न भेजें। "
+                    "2-3 sentences में plain text में जवाब दें — कोई markdown नहीं।"
                 )
             elif lang == "mr":
                 system_prompt = (
-                    "महत्त्वाचे: फक्त मराठीतच उत्तर द्या. हिंदी किंवा इंग्रजीत उत्तर देऊ नका, "
-                    "जरी आधीचे संभाषण हिंदीत होते तरी. "
+                    "STRICT: Output ONLY the final customer response — no reasoning steps, no numbered analysis, "
+                    "no chain-of-thought. Start directly with the first word of your answer. "
                     "तुम्ही Airtel ची एक महिला customer support agent आहात. "
-                    "फक्त मराठीत उत्तर द्या — Roman script मध्ये नाही. "
-                    "2-3 वाक्यांपेक्षा जास्त नको. "
+                    "फक्त मराठी Devanagari script मध्ये उत्तर द्या — Roman नाही, Hindi नाही. "
+                    "2-3 वाक्यांत plain text मध्ये उत्तर द्या. "
                     "Customer ला app, website किंवा 121 वर पाठवू नका. "
                     "Customer च्या account data वापरून थेट उत्तर द्या."
                 )
             else:
                 system_prompt = (
+                    "STRICT: Output ONLY the final customer response — no reasoning steps, no numbered analysis, "
+                    "no chain-of-thought. Start directly with the first word of your answer. "
                     "You are a female Airtel customer support agent. "
-                    "The customer is speaking English. Respond ONLY in English — never in Hindi, Marathi, or any other language. "
-                    "Do NOT say you can only help in Hindi. Do NOT say your purpose is to respond in Hindi. "
-                    "If the user asks why you responded in Hindi, apologize and continue in English immediately. "
+                    "The customer is speaking English. Respond ONLY in English. "
                     "The CUSTOMER ACCOUNT DATA below is authentic — answer directly from it. "
                     "Reply in 2-3 short spoken sentences, plain text only, no markdown."
                 )
@@ -493,11 +524,12 @@ class QueryResolverAgent:
             }
         except Exception as e:
             logger.error("[QueryAgent] Error in run | call_id=%s | error=%s", context.call_id, e, exc_info=True)
-            fallback = (
-                "मुझे अभी आपका जवाब देने में थोड़ी परेशानी हो रही है। कृपया थोड़ी देर बाद try करें।"
-                if (context.language or "hi") == "hi"
-                else "I'm having trouble answering right now. Please try again in a moment."
-            )
+            lang_fb = context.language or "hi"
+            fallback = {
+                "hi": "मुझे अभी आपका जवाब देने में थोड़ी परेशानी हो रही है। कृपया थोड़ी देर बाद try करें।",
+                "mr": "मला आत्ता उत्तर देण्यात अडचण येत आहे. कृपया थोड़्या वेळाने पुन्हा प्रयत्न करा.",
+                "en": "I'm having trouble answering right now. Please try again in a moment.",
+            }.get(lang_fb, "I'm having trouble answering right now. Please try again in a moment.")
             return {"response": fallback, "rag_context_used": "", "customer_context_used": ""}
 
 
