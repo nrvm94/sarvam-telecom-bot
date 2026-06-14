@@ -15,6 +15,54 @@ logger = logging.getLogger(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "mock_customers.json")
 
 
+# ---------------------------------------------------------------------------
+# Farewell detection
+# ---------------------------------------------------------------------------
+
+FAREWELL_WORDS = frozenset([
+    # English
+    "bye", "goodbye", "thank you", "thanks", "that's all", "thats all",
+    "no more questions", "done", "finished", "that will be all",
+    # Hinglish / Roman Hindi
+    "shukriya", "dhanyawad", "alvida", "theek hai bye",
+    "koi sawaal nahi", "kuch nahi chahiye",
+    # Marathi Roman
+    "dhanyavad", "bas zale", "bhar zale", "kahi nahi",
+    # Hindi Devanagari
+    "धन्यवाद", "शुक्रिया", "अलविदा", "बस इतना ही",
+    # Marathi Devanagari
+    "आभारी आहे", "ठीक आहे bye",
+])
+
+GOODBYE_RESPONSES = {
+    "hi": "Airtel को चुनने के लिए धन्यवाद! आपका दिन शुभ हो।",
+    "mr": "Airtel निवडल्याबद्दल धन्यवाद! तुमचा दिवस चांगला जावो.",
+    "en": "Thank you for choosing Airtel! Have a great day.",
+}
+
+
+def _is_farewell(text: str) -> bool:
+    """Return True if the utterance is a closing/farewell.
+
+    Two guards prevent false positives:
+    1. Word-count guard: utterances longer than 6 words are never pure farewells.
+    2. Word-boundary matching for Roman words so "done" doesn't match "undone".
+    """
+    stripped = text.strip()
+    if len(stripped.split()) > 6:
+        return False
+    lower = stripped.lower()
+    for word in FAREWELL_WORDS:
+        if '\u0900' <= word[0] <= '\u097F':
+            # Devanagari: substring match is fine (no word-boundary concept)
+            if word in text:
+                return True
+        else:
+            if re.search(r'\b' + re.escape(word) + r'\b', lower):
+                return True
+    return False
+
+
 @dataclass
 class CallContext:
     call_id: str
@@ -307,8 +355,9 @@ VOICE_SYSTEM_PROMPT_EN = (
     "caller's account and bill — use them whenever the caller asks about their plan, data, "
     "balance, or bill, then answer using the returned data. This is a PHONE CALL: reply in "
     "2-3 short spoken sentences of plain text. Absolutely NO markdown, tables, bullet points, "
-    "headings, or symbols. Never tell the customer to check an app or website — you have their "
-    "data, so just tell them the answer directly. Speak naturally, as if talking out loud."
+    "headings, or symbols. For questions outside Airtel services or your knowledge, politely "
+    "direct the customer to the Airtel Thanks app or to call 121. Do not repeat what you said "
+    "in your previous response. Speak naturally, as if talking out loud."
 )
 
 VOICE_SYSTEM_PROMPT_HI = (
@@ -316,8 +365,8 @@ VOICE_SYSTEM_PROMPT_HI = (
     "bill dekhne ke tools hain — jab caller apne plan, data, balance ya bill ke baare mein "
     "poochhe to tools use karke returned data se jawab dein. Yeh ek PHONE CALL hai: 2-3 chhote "
     "bole jaane wale sentences mein plain text mein jawab dein. Koi markdown, table, bullet, "
-    "heading ya symbol bilkul nahi. Customer ko kabhi app ya website check karne ko mat kahein "
-    "— aapke paas data hai, isliye seedha jawab batayein. Natural, bolte hue andaz mein."
+    "heading ya symbol bilkul nahi. Scope se bahar sawaalon ke liye Airtel Thanks app ya 121 "
+    "par refer karein. Pichli response ko dobara mat dohraayein. Natural, bolte hue andaz mein."
 )
 
 REFUSAL_MARKERS = (
@@ -338,6 +387,7 @@ def _voice_clean(text: str) -> str:
     t = text or ""
     t = t.replace("|", " ")
     t = re.sub(r"[#*`_>]", "", t)
+    t = re.sub(r"^\s*\d+\.\s+", "", t, flags=re.MULTILINE)  # numbered lists (CoT headers)
     t = re.sub(r"^\s*[-•]\s+", "", t, flags=re.MULTILINE)
     t = re.sub(r"\n{2,}", " ", t)
     t = re.sub(r"\s{2,}", " ", t)
@@ -447,7 +497,8 @@ class QueryResolverAgent:
                     "आप Airtel की एक महिला customer support agent हैं। "
                     "हमेशा शुद्ध हिंदी में देवनागरी लिपि में जवाब दें — Roman/Hinglish में नहीं। "
                     "नीचे दिया गया CUSTOMER ACCOUNT DATA authentic है — सीधे इसी data से जवाब दें। "
-                    "Customer को कभी app, website, store या 121 पर न भेजें। "
+                    "Airtel services के बाहर के सवालों के लिए Airtel Thanks app या 121 पर refer करें। "
+                    "पिछली response को दोबारा मत दोहराएं। "
                     "2-3 sentences में plain text में जवाब दें — कोई markdown नहीं।"
                 )
             elif lang == "mr":
@@ -457,7 +508,8 @@ class QueryResolverAgent:
                     "तुम्ही Airtel ची एक महिला customer support agent आहात. "
                     "फक्त मराठी Devanagari script मध्ये उत्तर द्या — Roman नाही, Hindi नाही. "
                     "2-3 वाक्यांत plain text मध्ये उत्तर द्या. "
-                    "Customer ला app, website किंवा 121 वर पाठवू नका. "
+                    "Airtel सेवांच्या बाहेरील प्रश्नांसाठी Airtel Thanks app किंवा 121 वर refer करा. "
+                    "मागील उत्तर पुन्हा सांगू नका. "
                     "Customer च्या account data वापरून थेट उत्तर द्या."
                 )
             else:
@@ -467,6 +519,8 @@ class QueryResolverAgent:
                     "You are a female Airtel customer support agent. "
                     "The customer is speaking English. Respond ONLY in English. "
                     "The CUSTOMER ACCOUNT DATA below is authentic — answer directly from it. "
+                    "For questions outside Airtel services, direct them to the Airtel Thanks app or call 121. "
+                    "Do not repeat your previous response. "
                     "Reply in 2-3 short spoken sentences, plain text only, no markdown."
                 )
 
@@ -550,7 +604,7 @@ ADDON_KEYWORDS = ["disney", "hotstar", "amazon prime", "prime", "wynk", "netflix
 
 AFFIRMATIVE = ["haan", "yes", "theek hai", "okay", "ok", "kar do", "haan kar do", "confirm", "bilkul", "zaroor", "sure"]
 
-MOCK_BASE = "http://localhost:5000"
+MOCK_BASE = os.getenv("MOCK_SERVER_URL", "http://localhost:5000")
 
 ACTION_ENDPOINTS = {
     "CANCEL_ADDON": "/mock/cancel-addon",

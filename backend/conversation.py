@@ -58,7 +58,7 @@ ISSUE_KEYWORDS = {
         # Devanagari (Hindi) — "जानकारी" (info) intentionally omitted; too generic.
         # "अकाउंट" (account) is in balance_check (Latin "account") so not repeated here.
         "प्लान", "ऑफर", "पैक", "वैलिडिटी", "रिचार्ज",
-        "डिटेल", "डिटेल्स", "करंट", "विवरण",
+        "डिटेल", "डिटेल्स", "विवरण",
         # Devanagari (Marathi)
         "योजना", "माहिती", "सांग", "तपशील",
     ],
@@ -93,31 +93,6 @@ class ConversationManager:
     """
     Analyses conversation turns for escalation signals and issue categorisation.
     """
-
-    async def detect_escalation(self, query: str, response: str) -> bool:
-        """
-        Check if the conversation turn indicates the customer needs human support.
-
-        Args:
-            query: Customer's transcribed utterance.
-            response: Bot's generated response.
-
-        Returns:
-            True if escalation is warranted, False otherwise.
-        """
-        combined = (query + " " + response).lower()
-
-        for keyword in ESCALATION_KEYWORDS:
-            if keyword.lower() in combined:
-                logger.info(
-                    "Escalation triggered | keyword=%r | query=%r",
-                    keyword,
-                    query[:80],
-                )
-                return True
-
-        logger.debug("No escalation detected | query=%r", query[:80])
-        return False
 
     async def classify_issue(self, query: str) -> str:
         """

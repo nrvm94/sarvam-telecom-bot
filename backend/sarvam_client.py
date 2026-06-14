@@ -27,10 +27,22 @@ logger = logging.getLogger(__name__)
 # Chain-of-thought stripper
 # ---------------------------------------------------------------------------
 
+# Matches numbered CoT section headers AND analysis-prose lines that the model
+# sometimes emits in the "answer area" (e.g. "Wait, let me reconsider...").
+# Used by _strip_cot() English backward-walk to skip over them rather than stop.
+_ANALYSIS_LINE = re.compile(
+    r'^\*+\s+\*\*'                  # sub-bullet headers  **Foo**
+    r'|^Wait[,\s]|^Actually[,\s]'   # self-correction prose
+    r'|^Let me |^I should |^Hmm[,\s]'
+    r'|^The response is|^So the (final|answer)',
+    re.IGNORECASE,
+)
+
+
 def _strip_cot(text: str, language: str = "en") -> str:
     """Remove LLM chain-of-thought reasoning from the response.
 
-    sarvam-30b sometimes externalises its step-by-step thinking in the content
+    sarvam-105b sometimes externalises its step-by-step thinking in the content
     field before the final answer.  Detected by numbered markdown headers like
     "1. **Deconstruct the Request:**".  We extract the final clean customer
     response that appears after all reasoning steps.
@@ -50,9 +62,9 @@ def _strip_cot(text: str, language: str = "en") -> str:
 
     if language in ("hi", "mr", "hi-IN", "mr-IN"):
         # Devanagari sentences: start with a Devanagari char, end with ।/!/?.
-        # Allow mixed Devanagari/Roman (e.g. "आपका plan 999 है।")
+        # Cap at 300 chars to prevent matching across paragraph boundaries.
         sentences = re.findall(
-            r'[\u0900-\u097F][^।!?\n]{3,}[।!?]',
+            r'[\u0900-\u097F][^।!?\n]{3,300}[।!?]',
             text,
         )
         if sentences:
@@ -60,16 +72,23 @@ def _strip_cot(text: str, language: str = "en") -> str:
             clean = " ".join(s.strip() for s in sentences[-3:])
             if len(clean) > 15:
                 return clean
+        # Safety net: last 200 chars of Devanagari text
+        deva_chars = re.findall(r'[\u0900-\u097F\s.,!?।₹0-9]+', text)
+        if deva_chars:
+            fallback = deva_chars[-1].strip()[-200:].strip()
+            if len(fallback) > 15:
+                return fallback
 
-    # English / fallback: last non-CoT paragraph (no leading digit or *.*)
+    # English / fallback: walk backward collecting clean lines.
+    # Stop at numbered CoT section headers; skip (continue) analysis-prose lines.
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     result: list[str] = []
     for line in reversed(lines):
-        # Stop once we hit a CoT marker line
-        if re.match(r'^\d+\.\s*\*\*|^\*\s*\*\*|^#+\s', line):
+        if re.match(r'^\d+\.\s*\*\*|^#+\s', line):  # major CoT header → stop
             break
-        if not re.match(r'^\*+\s+\*\*', line):   # skip sub-bullet headers
-            result.insert(0, line)
+        if _ANALYSIS_LINE.match(line):               # analysis prose → skip
+            continue
+        result.insert(0, line)
     clean = " ".join(result).strip()
     if len(clean) > 15:
         return clean
@@ -272,51 +291,48 @@ class SarvamClient:
     # ------------------------------------------------------------------
 
     async def transcribe_audio(
-        self, audio_bytes: bytes, language: str = "hi-IN"
-    ) -> str:
+        self, audio_bytes: bytes, language: str = None
+    ) -> tuple[str, str]:
         """
-        Transcribe raw audio bytes to text using Sarvam Saaras STT.
+        Transcribe raw audio bytes to text using Sarvam Saaras v3 STT.
 
         The API expects multipart/form-data — NOT base64 JSON.
+        Saaras v3 auto-detects the spoken language when language_code="unknown".
 
         Args:
-            audio_bytes: Raw WebM/Opus audio captured from browser microphone.
-            language:    BCP-47 code, e.g. "hi-IN" or "en-IN" or "mr-IN".
+            audio_bytes: Raw WebM/Opus or WAV audio.
+            language:    BCP-47 hint (e.g. "hi-IN"). Pass None for auto-detection.
 
         Returns:
-            Transcribed text string.
+            Tuple of (transcript, detected_language_code).
+            detected_language_code is a BCP-47 code e.g. "hi-IN", "en-IN", "mr-IN".
         """
+        lang_code = language if language else "unknown"
         logger.debug(
-            "STT | language=%s | audio_bytes=%d", language, len(audio_bytes)
+            "STT | language_hint=%s | audio_bytes=%d", lang_code, len(audio_bytes)
         )
 
-        # Build multipart form — field 'file' is required by Sarvam STT
-        # Model: saarika = transcription in original language (what we need)
-        #        saaras  = speech-to-English translation (NOT what we need)
         # Auto-detect format: WAV starts with b'RIFF'; everything else is WebM.
         if audio_bytes[:4] == b'RIFF':
             _fname, _ctype = "audio.wav", "audio/wav"
         else:
             _fname, _ctype = "audio.webm", "audio/webm"
+
         data = aiohttp.FormData()
-        data.add_field(
-            "file",
-            audio_bytes,
-            filename=_fname,
-            content_type=_ctype,
-        )
-        data.add_field("language_code", language)
-        data.add_field("model", "saarika:v2.5")
+        data.add_field("file", audio_bytes, filename=_fname, content_type=_ctype)
+        data.add_field("model", "saaras:v3")
+        data.add_field("mode", "transcribe")
+        data.add_field("language_code", lang_code)
 
         url = f"{self.base_url}/speech-to-text"
-        logger.debug("STT | POST %s | language=%s | audio_bytes=%d", url, language, len(audio_bytes))
+        logger.debug("STT | POST %s | lang=%s | bytes=%d", url, lang_code, len(audio_bytes))
 
         t0 = time.time()
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
                 data=data,
-                headers=self._subscription_headers(),  # api-subscription-key
+                headers=self._subscription_headers(),
             ) as resp:
                 elapsed_ms = (time.time() - t0) * 1000
                 body = await resp.json(content_type=None)
@@ -324,25 +340,25 @@ class SarvamClient:
 
                 if resp.status != 200:
                     logger.error(
-                        "STT failed | status=%d | language=%s | body=%s",
-                        resp.status, language, str(body)[:500],
+                        "STT failed | status=%d | body=%s",
+                        resp.status, str(body)[:500],
                     )
                     raise RuntimeError(
                         f"Sarvam STT failed: HTTP {resp.status} | {body}"
                     )
 
-                # Response: {"transcript": "...", ...}
                 transcript = (
                     body.get("transcript")
                     or body.get("text")
                     or body.get("transcription")
                     or ""
                 )
+                detected_lang = body.get("language_code") or lang_code
                 logger.info(
-                    "STT done | language=%s | elapsed=%.0fms | transcript=%r",
-                    language, elapsed_ms, transcript[:120],
+                    "STT done | detected=%s | elapsed=%.0fms | transcript=%r",
+                    detected_lang, elapsed_ms, transcript[:120],
                 )
-                return transcript
+                return transcript, detected_lang
 
     # ------------------------------------------------------------------
     # Method 2 — Chat Completions (LLM)
@@ -369,6 +385,8 @@ class SarvamClient:
             Bot response text.
         """
         system_content = system_prompt_override or (
+            "STRICT: Output ONLY the final customer response — no reasoning steps, no numbered analysis, "
+            "no chain-of-thought. Start directly with your answer to the customer. "
             "You are a helpful Airtel customer support agent. "
             "Detect the language of the user's message and respond in the SAME language and style. "
             "If the user writes in Hindi (Devanagari script), respond only in Hindi using Devanagari script — no Roman Hindi. "
@@ -388,10 +406,10 @@ class SarvamClient:
         messages.append({"role": "user", "content": user_content})
 
         payload = {
-            "model": "sarvam-30b",
+            "model": "sarvam-105b",
             "messages": messages,
             "temperature": 0.3,
-            # Do NOT set max_tokens — sarvam-30b and sarvam-105b are reasoning models
+            # Do NOT set max_tokens — sarvam-105b is a reasoning model
             # that spend ~1500-2000 tokens on internal chain-of-thought before writing
             # the actual response. Any hard cap will truncate during reasoning, leaving
             # content=None. Let the model finish naturally (finish_reason='stop').
@@ -479,7 +497,7 @@ class SarvamClient:
             The assistant message dict from choices[0].message.
         """
         payload = {
-            "model": "sarvam-30b",
+            "model": "sarvam-105b",
             "messages": messages,
             "tools": tools,
             "tool_choice": "auto",

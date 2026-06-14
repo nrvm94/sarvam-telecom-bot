@@ -11,7 +11,9 @@ from agents import (
     CallContext,
     CustomerProfileAgent,
     EscalationAgent,
+    GOODBYE_RESPONSES,
     QueryResolverAgent,
+    _is_farewell,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,15 +78,14 @@ class VoiceOrchestrator:
             if language == "hi":
                 greeting = f"नमस्कार {first_name} जी! मैं Airtel की virtual assistant हूँ। आज मैं आपकी कैसे मदद कर सकती हूँ?"
             elif language == "mr":
-                # Greet in Hindi as bridge language; bot will follow user's language turn-by-turn
-                greeting = f"नमस्कार {first_name} जी! मैं Airtel की virtual assistant हूँ। आज मैं आपकी कैसे मदद कर सकती हूँ?"
+                greeting = f"नमस्कार {first_name}! मी Airtel ची virtual assistant आहे. आज मी तुम्हाला कशी मदत करू शकते?"
             else:
                 greeting = f"Hello {first_name}! I'm Airtel's virtual assistant. How can I help you today?"
         else:
             if language == "hi":
                 greeting = "नमस्कार! मैं Airtel की virtual assistant हूँ। आज मैं आपकी कैसे मदद कर सकती हूँ?"
             elif language == "mr":
-                greeting = "नमस्कार! मैं Airtel की virtual assistant हूँ। आज मैं आपकी कैसे मदद कर सकती हूँ?"
+                greeting = "नमस्कार! मी Airtel ची virtual assistant आहे. आज मी तुम्हाला कशी मदत करू शकते?"
             else:
                 greeting = "Hello! I'm Airtel's virtual assistant. How can I help you today?"
 
@@ -114,6 +115,26 @@ class VoiceOrchestrator:
         context.current_query = transcription
         context.turn_count += 1
         turn_start = time.time()
+
+        # Farewell short-circuit — clean goodbye before LLM/escalation
+        if _is_farewell(transcription):
+            response_text = GOODBYE_RESPONSES.get(context.language, GOODBYE_RESPONSES["en"])
+            self.update_history(context, transcription, response_text)
+            logger.info(
+                "[Orchestrator] Farewell detected | call_id=%s | lang=%s | response=%r",
+                call_id, context.language, response_text,
+            )
+            return {
+                "transcription": transcription,
+                "response": response_text,
+                "escalated": False,
+                "routing": None,
+                "priority": None,
+                "ticket_id": None,
+                "issue_type": "farewell",
+                "turn_count": context.turn_count,
+                "action_detected": None,
+            }
 
         # Update language per-turn based on detected language
         if detected_lang:

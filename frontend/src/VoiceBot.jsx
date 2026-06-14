@@ -128,6 +128,7 @@ export default function VoiceBot() {
   const [lookedUpPhone, setLookedUpPhone] = useState('')
 
   // Refs
+  const botResponseRef    = useRef('')
   const callIdRef         = useRef(null)
   const callTimerRef      = useRef(null)
   const errorTimerRef     = useRef(null)
@@ -212,6 +213,7 @@ export default function VoiceBot() {
 
     else if (msg.type === 'response') {
       setBotResponse(msg.text)
+      botResponseRef.current = msg.text
       if (msg.escalate) {
         setEscalated(true)
         const routing = msg.routing ? msg.routing.replace(/_/g, ' ') : 'support team'
@@ -246,7 +248,7 @@ export default function VoiceBot() {
       if (msg.is_last) {
         // Add bot response to conversation after last chunk starts queuing
         const ts = nowISO()
-        const responseText = botResponse
+        const responseText = botResponseRef.current
         setConversation(prev => [
           ...prev,
           { role: 'bot', text: responseText, timestamp: ts },
@@ -269,7 +271,7 @@ export default function VoiceBot() {
       setBotStatus('active')
       setStatusMsg('Listening...')
     }
-  }, [botResponse])
+  }, [])
 
   // ---- Start PCM capture via ScriptProcessorNode --------------------------
 
@@ -319,6 +321,7 @@ export default function VoiceBot() {
     setConversation([])
     setTranscription('')
     setBotResponse('')
+    botResponseRef.current = ''
     setCallDuration(0)
     setCustomerName('')
     setCustomerFound(false)
@@ -435,6 +438,8 @@ export default function VoiceBot() {
     setBotStatus('idle')
     setTranscription('')
     setBotResponse('')
+    botResponseRef.current = ''
+    setConversation([])
     setEscalated(false)
     setTicketMessage('')
     setCallDuration(0)

@@ -20,7 +20,6 @@ Latency improvements over HTTP pipeline
   • No MediaRecorder buffering: PCM chunks stream continuously from the browser
 """
 
-import asyncio
 import base64
 import os
 import re
@@ -47,7 +46,6 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketTransport,
 )
 
-from language_detect import _HINGLISH_WORDS, _MARATHI_ROMAN_WORDS, _detect_language
 
 import logging
 logger = logging.getLogger(__name__)
@@ -103,127 +101,29 @@ class SarvamDualSTTService(SegmentedSTTService):
         self._ctx = call_context
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame | None, None]:
-        """Run dual-batch STT and detect language; yield TranscriptionFrame."""
-        lang_pref = self._ctx.get('language', 'hi')
-        stt_lang = {'hi': 'hi-IN', 'mr': 'mr-IN'}.get(lang_pref, 'en-IN')
-
+        """Run Saaras v3 STT with auto language detection; yield TranscriptionFrame."""
         try:
-            if stt_lang != 'en-IN':
-                # ---- Non-English preference: parallel native + en-IN STT ----
-                if stt_lang == 'hi-IN':
-                    # Also probe mr-IN: en-IN STT can TRANSLATE Marathi speech to
-                    # English, stripping all Marathi signals.  mr-IN STT reliably
-                    # transcribes Marathi so _detect_language() can catch it.
-                    nat_tr, en_tr, mr_tr = await asyncio.gather(
-                        self._sarvam.transcribe_audio(audio, 'hi-IN'),
-                        self._sarvam.transcribe_audio(audio, 'en-IN'),
-                        self._sarvam.transcribe_audio(audio, 'mr-IN'),
-                    )
-                    mr_tr = (mr_tr or '').strip()
-                else:
-                    nat_tr, en_tr = await asyncio.gather(
-                        self._sarvam.transcribe_audio(audio, stt_lang),
-                        self._sarvam.transcribe_audio(audio, 'en-IN'),
-                    )
-                    mr_tr = ''
-
-                nat_tr = (nat_tr or '').strip()
-                en_tr  = (en_tr  or '').strip()
-
-                # If mr-IN STT confirms Marathi, use it and skip further analysis.
-                if mr_tr and _detect_language(mr_tr, user_pref='mr') == 'mr':
-                    logger.info("Dual STT | hi-IN=%r | en-IN=%r | mr-IN=%r", nat_tr[:60], en_tr[:60], mr_tr[:60])
-                    logger.info("STT: mr (mr-IN STT confirmed Marathi)")
-                    transcription = mr_tr
-                    detected_lang = 'mr'
-                else:
-                    logger.info("Dual STT | %s=%r | en-IN=%r", stt_lang, nat_tr[:80], en_tr[:80])
-
-                    en_words          = set(en_tr.lower().split())
-                    en_roman          = len(re.findall(r'[a-zA-Z]', en_tr))
-                    en_all_alpha      = len(re.findall(r'[a-zA-Z\u0900-\u097F]', en_tr))
-                    en_roman_ratio    = en_roman / max(1, en_all_alpha)
-                    en_words_clean    = {re.sub(r'[^a-z]', '', w) for w in en_words} - {''}
-                    has_hinglish      = bool(en_words_clean & _HINGLISH_WORDS)
-                    has_marathi_roman = bool(en_words_clean & _MARATHI_ROMAN_WORDS)
-                    has_deva_in_en    = bool(re.search(r'[\u0900-\u097F]', en_tr))
-
-                    if (en_tr
-                            and en_roman_ratio > 0.8
-                            and not has_hinglish
-                            and not has_marathi_roman
-                            and not has_deva_in_en
-                            and len(en_words) >= 2):
-                        # Before declaring English, check hi-IN STT for Marathi.
-                        # en-IN can translate Marathi speech to English, losing all signals.
-                        nat_lang_check = _detect_language(nat_tr, user_pref=lang_pref) if nat_tr else lang_pref
-                        if nat_lang_check == 'mr':
-                            transcription = nat_tr
-                            detected_lang = 'mr'
-                            logger.info("STT: mr (hi-IN detected Marathi, en-IN had translated it away)")
-                        else:
-                            transcription = en_tr
-                            detected_lang = 'en'
-                            logger.info("STT: en (clean en-IN output)")
-                    else:
-                        transcription = nat_tr or en_tr
-                        detected_lang = (
-                            _detect_language(transcription, user_pref=lang_pref)
-                            if transcription else lang_pref
-                        )
-                        logger.info(
-                            "STT: %s (en-IN not clean | hinglish=%s | roman_ratio=%.2f)",
-                            detected_lang, has_hinglish, en_roman_ratio,
-                        )
-            else:
-                # ---- English preference: single en-IN STT ----
-                transcription = await self._sarvam.transcribe_audio(audio, 'en-IN')
-                transcription = (transcription or '').strip()
-
-                tr_words        = set(transcription.lower().split())
-                tr_words_clean  = {re.sub(r'[^a-z]', '', w) for w in tr_words} - {''}
-                has_hinglish    = bool(tr_words_clean & _HINGLISH_WORDS)
-                has_marathi_r   = bool(tr_words_clean & _MARATHI_ROMAN_WORDS)
-                has_devanagari  = bool(re.search(r'[\u0900-\u097F]', transcription))
-
-                if has_marathi_r:
-                    mr_tr = await self._sarvam.transcribe_audio(audio, 'mr-IN')
-                    mr_tr = (mr_tr or '').strip()
-                    transcription = mr_tr or transcription
-                    detected_lang = _detect_language(transcription, user_pref='mr')
-                    logger.info("STT: language switch en→mr detected")
-                elif has_hinglish or has_devanagari:
-                    hi_tr = await self._sarvam.transcribe_audio(audio, 'hi-IN')
-                    hi_tr = (hi_tr or '').strip()
-                    transcription = hi_tr or transcription
-                    detected_lang = _detect_language(transcription, user_pref='hi')
-                    logger.info("STT: language switch en→%s detected", detected_lang)
-                else:
-                    detected_lang = 'en'
-
-            if not transcription or not transcription.strip():
-                logger.info("STT: empty transcript — skipping")
+            transcription, detected_lang_code = await self._sarvam.transcribe_audio(audio)
+            transcription = (transcription or '').strip()
+            _bcp_to_short = {'hi-IN': 'hi', 'mr-IN': 'mr', 'en-IN': 'en'}
+            detected_lang = _bcp_to_short.get(
+                detected_lang_code,
+                detected_lang_code.split('-')[0] if detected_lang_code else 'hi'
+            )
+            if not transcription:
+                logger.info('STT: empty transcript — skipping')
                 return
-
-            logger.info("STT done | detected=%s | text=%r", detected_lang, transcription[:80])
-
-            # Update language for next turn (OrchestratorTTSProcessor reads this)
+            logger.info('STT done | detected=%s | text=%r', detected_lang, transcription[:80])
             self._ctx['language'] = detected_lang
-
-            _lang_map = {
-                'hi': Language.HI_IN,
-                'mr': Language.MR_IN,
-                'en': Language.EN_IN,
-            }
+            _lang_map = {'hi': Language.HI_IN, 'mr': Language.MR_IN, 'en': Language.EN_IN}
             yield TranscriptionFrame(
                 text=transcription,
                 user_id='',
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 language=_lang_map.get(detected_lang, Language.EN_IN),
             )
-
         except Exception as exc:
-            logger.error("SarvamDualSTTService.run_stt error: %s", exc, exc_info=True)
+            logger.error('SarvamDualSTTService.run_stt error: %s', exc, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -386,9 +286,10 @@ async def run_voice_ws_pipeline(
         orchestrator: VoiceOrchestrator instance.
     """
     # Shared mutable state for STT ↔ Orchestrator language handoff
+    _ctx = orchestrator.active_calls.get(call_id)
     call_context: dict = {
         'call_id': call_id,
-        'language': 'hi',  # Updated after each turn by SarvamDualSTTService
+        'language': _ctx.language if _ctx else 'hi',  # Updated after each turn by SarvamDualSTTService
     }
 
     transport = FastAPIWebsocketTransport(

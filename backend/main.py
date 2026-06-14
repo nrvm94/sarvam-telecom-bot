@@ -3,7 +3,6 @@ Sarvam Telecom Bot — FastAPI Backend
 Orchestrates: STT → RAG → LLM → TTS → Supabase → n8n escalation
 """
 
-import asyncio
 import base64
 import logging
 import os
@@ -25,14 +24,6 @@ from pydantic import BaseModel, Field
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from conversation import ConversationManager        # noqa: E402
-from language_detect import (                      # noqa: E402
-    _detect_language,
-    _HINGLISH_WORDS,
-    _MARATHI_DEVANAGARI_WORDS,
-    _HINDI_DEVANAGARI_WORDS,
-    _HINDI_POSTPOSITIONS,
-    _MARATHI_ROMAN_WORDS,
-)
 from rag_engine import AirtelKnowledgeBase         # noqa: E402
 from sarvam_client import SarvamClient             # noqa: E402
 from supabase_client import SupabaseClient         # noqa: E402
@@ -90,9 +81,6 @@ rag_engine: AirtelKnowledgeBase = None    # type: ignore[assignment]
 conversation_manager: ConversationManager = None  # type: ignore[assignment]
 supabase_client: SupabaseClient = None    # type: ignore[assignment]
 orchestrator = None                        # type: ignore[assignment]
-
-# Kept for safety; orchestrator now owns per-call history
-call_history: dict = {}
 
 
 # ---- Startup event -------------------------------------------------------
@@ -200,17 +188,17 @@ async def debug_test_apis():
         with wave.open(buf, "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
             w.writeframes(b"\x00" * 32000)  # 1 second silence
-        transcript = await sarvam_client.transcribe_audio(buf.getvalue(), "hi-IN")
+        transcript, _lang = await sarvam_client.transcribe_audio(buf.getvalue())
         results["stt"] = {"status": "ok", "transcript": repr(transcript)}
     except Exception as e:
         results["stt"] = {"status": "error", "error": str(e)}
 
     # 4. Config info (proves which code version is running)
     results["config"] = {
-        "stt_model": "saarika:v2.5",
-        "llm_model": "sarvam-30b",
+        "stt_model": "saaras:v3",
+        "llm_model": "sarvam-105b",
         "tts_model": "bulbul:v3",
-        "tts_speaker": "anushka",
+        "tts_speaker": "ritu",
         "sarvam_base": os.getenv("SARVAM_API_BASE", ""),
         "key_prefix": os.getenv("SARVAM_API_KEY", "")[:8] + "***",
     }
@@ -265,8 +253,7 @@ async def start_call(req: StartCallRequest):
     # Orchestrator: load customer profile and generate personalised greeting
     start_result = await orchestrator.start_call(call_id, req.customer_phone, req.language)
 
-    # TTS the greeting — Marathi greeting is spoken in Hindi (bridge language)
-    lang_code = {"hi": "hi-IN", "mr": "hi-IN"}.get(req.language, "en-IN")
+    lang_code = {"hi": "hi-IN", "mr": "mr-IN"}.get(req.language, "en-IN")
     try:
         greeting_audio = await sarvam_client.synthesize_speech(
             text=start_result["greeting"],
@@ -313,132 +300,17 @@ async def transcribe_and_respond(req: TranscribeRequest):
         audio_bytes = base64.b64decode(req.audio_base64)
         logger.debug("Step 1 — Audio decoded | bytes=%d", len(audio_bytes))
 
-        # Step 2 — STT with parallel language detection
-        # For hi/mr preference: run native-language and en-IN STT in parallel.
-        # English speech through en-IN → clean Roman text, no Hindi/Hinglish words.
-        # Hindi/Marathi speech through en-IN → Hinglish Roman (caught by _HINGLISH_WORDS)
-        # or garbled phonetics — both indicate non-English speech.
-        # This approach is reliable even when saarika:v2.5 semantically translates
-        # English into Hindi (e.g. "what is my plan" → "मेरा प्लान क्या है"), which
-        # makes vocabulary-density detection impossible.
-        step = "Step 2: STT (Sarvam Saarika)"
-        stt_lang = {"hi": "hi-IN", "mr": "mr-IN"}.get(req.language, "en-IN")
-
-        if stt_lang != "en-IN":
-            if stt_lang == "hi-IN":
-                # When preference is Hindi, also probe mr-IN in parallel.
-                # Sarvam en-IN STT can TRANSLATE Marathi speech to English, which
-                # strips all Marathi signals.  mr-IN STT reliably transcribes
-                # Marathi → Devanagari so _detect_language() can catch it.
-                nat_tr, en_tr, mr_tr = await asyncio.gather(
-                    sarvam_client.transcribe_audio(audio_bytes, "hi-IN"),
-                    sarvam_client.transcribe_audio(audio_bytes, "en-IN"),
-                    sarvam_client.transcribe_audio(audio_bytes, "mr-IN"),
-                )
-                mr_tr = (mr_tr or "").strip()
-            else:
-                nat_tr, en_tr = await asyncio.gather(
-                    sarvam_client.transcribe_audio(audio_bytes, stt_lang),
-                    sarvam_client.transcribe_audio(audio_bytes, "en-IN"),
-                )
-                mr_tr = ""
-
-            nat_tr = (nat_tr or "").strip()
-            en_tr  = (en_tr  or "").strip()
-
-            # If mr-IN STT output looks like Marathi, trust it and skip further checks.
-            if mr_tr and _detect_language(mr_tr, user_pref="mr") == "mr":
-                transcription = mr_tr
-                detected_lang = "mr"
-                logger.info(
-                    "Step 2 — Dual STT | hi-IN=%r | en-IN=%r | mr-IN=%r",
-                    nat_tr[:60], en_tr[:60], mr_tr[:60],
-                )
-                logger.info("Step 2 — Language: mr (mr-IN STT confirmed Marathi)")
-            else:
-                logger.info(
-                    "Step 2 — Dual STT | %s=%r | en-IN=%r",
-                    stt_lang, nat_tr[:80], en_tr[:80],
-                )
-
-                en_words             = set(en_tr.lower().split())
-                en_roman             = len(re.findall(r'[a-zA-Z]', en_tr))
-                en_all_alpha         = len(re.findall(r'[a-zA-Z\u0900-\u097F]', en_tr))
-                en_roman_ratio       = en_roman / max(1, en_all_alpha)
-                # Strip trailing punctuation before Hinglish/Marathi check so "hai." matches "hai"
-                en_words_no_punct    = {re.sub(r'[^a-z]', '', w) for w in en_words} - {''}
-                has_hinglish         = bool(en_words_no_punct & _HINGLISH_WORDS)
-                has_marathi_roman    = bool(en_words_no_punct & _MARATHI_ROMAN_WORDS)
-                has_devanagari_in_en = bool(re.search(r'[\u0900-\u097F]', en_tr))
-
-                # Treat as English only when en-IN produces clean Roman output:
-                # > 80 % Roman chars + no Hinglish/Marathi words + no Devanagari + ≥ 2 words.
-                if (en_tr
-                        and en_roman_ratio > 0.8
-                        and not has_hinglish
-                        and not has_marathi_roman
-                        and not has_devanagari_in_en
-                        and len(en_words) >= 2):
-                    # Before declaring English, check if hi-IN STT output is Marathi.
-                    # en-IN STT can translate Marathi to English, losing all Marathi
-                    # signals.  hi-IN STT on Marathi speech often produces Marathi
-                    # Devanagari which _detect_language() correctly classifies as "mr".
-                    nat_lang_check = _detect_language(nat_tr, user_pref=req.language) if nat_tr else req.language
-                    if nat_lang_check == "mr":
-                        transcription = nat_tr
-                        detected_lang  = "mr"
-                        logger.info("Step 2 — Language: mr (hi-IN detected Marathi, en-IN had translated it away)")
-                    else:
-                        transcription = en_tr
-                        detected_lang  = "en"
-                        logger.info("Step 2 — Language: en (clean en-IN output)")
-                else:
-                    transcription = nat_tr or en_tr
-                    detected_lang  = (
-                        _detect_language(transcription, user_pref=req.language)
-                        if transcription else req.language
-                    )
-                    logger.info(
-                        "Step 2 — Language: %s (en-IN not clean | hinglish=%s | roman_ratio=%.2f)",
-                        detected_lang, has_hinglish, en_roman_ratio,
-                    )
-        else:
-            # User preference is English — use en-IN STT
-            transcription = await sarvam_client.transcribe_audio(audio_bytes, stt_lang)
-            transcription = (transcription or "").strip()
-
-            # Even with an English preference the user may have switched to Hindi/
-            # Marathi mid-conversation.  en-IN STT on Hindi speech returns Hinglish
-            # Roman words (e.g. "mera balance kya hai").  On Marathi speech it may
-            # return phonetic Marathi Roman (e.g. "kiti data madhe aahe?").
-            # Detect both and re-transcribe with the correct model.
-            tr_words        = set(transcription.lower().split())
-            tr_words_clean  = {re.sub(r'[^a-z]', '', w) for w in tr_words} - {''}
-            has_hinglish    = bool(tr_words_clean & _HINGLISH_WORDS)
-            has_marathi_r   = bool(tr_words_clean & _MARATHI_ROMAN_WORDS)
-            has_devanagari  = bool(re.search(r'[\u0900-\u097F]', transcription))
-
-            if has_marathi_r:
-                mr_tr = await sarvam_client.transcribe_audio(audio_bytes, "mr-IN")
-                mr_tr = (mr_tr or "").strip()
-                transcription = mr_tr or transcription
-                detected_lang = _detect_language(transcription, user_pref="mr")
-                logger.info(
-                    "Step 2 — Language switch en→mr detected | detected=%s | marathi_roman=%s",
-                    detected_lang, has_marathi_r,
-                )
-            elif has_hinglish or has_devanagari:
-                hi_tr = await sarvam_client.transcribe_audio(audio_bytes, "hi-IN")
-                hi_tr = (hi_tr or "").strip()
-                transcription = hi_tr or transcription
-                detected_lang = _detect_language(transcription, user_pref="hi")
-                logger.info(
-                    "Step 2 — Language switch en→hi detected | detected=%s | hinglish=%s",
-                    detected_lang, has_hinglish,
-                )
-            else:
-                detected_lang = "en"
-            logger.info("Step 2 — STT done | transcription=%r", transcription[:100])
+        # Step 2 — STT with Saaras v3 (auto language detection)
+        step = "Step 2: STT (Sarvam Saaras v3)"
+        transcription, detected_lang_code = await sarvam_client.transcribe_audio(audio_bytes)
+        transcription = (transcription or "").strip()
+        _lang_bcp_map = {"hi-IN": "hi", "mr-IN": "mr", "en-IN": "en"}
+        detected_lang = _lang_bcp_map.get(
+            detected_lang_code,
+            detected_lang_code.split("-")[0] if detected_lang_code else req.language
+        )
+        logger.info("Step 2 — STT done | saaras=%s | detected=%s | transcript=%r",
+                    detected_lang_code, detected_lang, transcription[:100])
 
         logger.info(
             "Language detected | detected_lang=%s | user_pref=%s | transcription=%r",
@@ -547,8 +419,6 @@ async def end_call(req: EndCallRequest):
     )
 
     end_result = await orchestrator.end_call(req.call_id, req.duration_seconds)
-    call_history.pop(req.call_id, None)  # Safety cleanup of legacy dict
-
     return {
         "call_id": req.call_id,
         "status": "completed",
@@ -608,50 +478,6 @@ async def n8n_callback(request: Request):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-
-# ---- Helper: n8n escalation trigger --------------------------------------
-
-async def trigger_n8n_escalation(
-    call_id: str, issue_type: str, query: str, response: str
-) -> None:
-    """
-    Fire-and-forget POST to n8n webhook to trigger the escalation workflow.
-    Failure does not propagate to the main pipeline.
-    """
-    webhook_url = os.getenv("N8N_WEBHOOK_URL", "")
-    if not webhook_url:
-        logger.warning("N8N_WEBHOOK_URL not set — skipping escalation trigger.")
-        return
-
-    payload = {
-        "call_id": call_id,
-        "issue_type": issue_type,
-        "user_query": query,
-        "bot_response": response,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-    logger.info(
-        "Triggering n8n escalation | call_id=%s | issue=%s | url=%s",
-        call_id,
-        issue_type,
-        webhook_url,
-    )
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                webhook_url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                logger.info(
-                    "n8n escalation response | status=%d", resp.status
-                )
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.warning(
-            "n8n escalation trigger failed (non-fatal): %s", exc
-        )
 
 
 # ---- Entrypoint ----------------------------------------------------------

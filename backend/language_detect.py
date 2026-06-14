@@ -183,7 +183,7 @@ def _detect_language(text: str, user_pref: str = "hi") -> str:
                 # just 2-3 function words ("is"→"है", "in"→"में") in an otherwise
                 # English sentence.
                 hindi_density = len(hindi_matches) / len(deva_set)
-                if len(hindi_matches) >= 2 and strong_matches and hindi_density >= 0.40:
+                if len(hindi_matches) >= 2 and strong_matches and hindi_density >= 0.33:
                     return "hi"
         # Devanagari with no recognised vocabulary (or low Hindi ratio) →
         # STT transliteration of English speech.

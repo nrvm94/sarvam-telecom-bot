@@ -154,6 +154,17 @@ class AirtelKnowledgeBase:
             logger.info("RAG query returned no results for: %r", question[:80])
             return ""
 
+        # Filter out results that are too distant (not relevant enough)
+        DISTANCE_THRESHOLD = 0.5
+        filtered = [
+            (doc, meta) for doc, meta, dist in zip(docs, metas, distances)
+            if dist < DISTANCE_THRESHOLD
+        ]
+        if not filtered:
+            logger.info("RAG: all results above distance threshold %.1f — returning empty", DISTANCE_THRESHOLD)
+            return ""
+        docs, metas = zip(*filtered)
+
         # Format context with category labels for clarity
         context_parts = []
         for doc, meta in zip(docs, metas):
