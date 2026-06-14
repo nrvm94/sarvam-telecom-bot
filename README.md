@@ -31,9 +31,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system diagram.
 |-------|-----------|---------|
 | Frontend | React 18 + Vite + TailwindCSS | Voice capture UI |
 | Backend | FastAPI + Python 3.11 | API orchestration |
-| STT | Sarvam Saaras v2 | Hindi/English speech-to-text |
-| LLM | Sarvam sarvam-m | Response generation |
-| TTS | Sarvam Bulbul v1 | Text-to-speech in Hindi/English |
+| STT | Sarvam Saaras v3 (saaras:v3) | Hindi/English speech-to-text + auto language detection |
+| LLM | Sarvam sarvam-105b | Response generation (reasoning model) |
+| TTS | Sarvam Bulbul v3 (bulbul:v3) | Text-to-speech, 37+ Indian voices |
 | Vector DB | ChromaDB | Semantic search over KB |
 | Embeddings | sentence-transformers/all-MiniLM-L6-v2 | Document embeddings |
 | Database | Supabase (PostgreSQL) | Call logs and conversation history |
@@ -158,9 +158,9 @@ Full API documentation: [docs/API_SPEC.md](docs/API_SPEC.md)
 
 | API | Endpoint | Why Chosen |
 |-----|----------|------------|
-| Saaras STT | `/v1/speech-to-text` | Best Hindi/English code-mixing support; 300ms latency |
-| Chat Completions | `/v1/chat/completions` | Native Indian language LLM; TRAI-compliant in-country processing |
-| Bulbul TTS | `/v1/text-to-speech` | Natural Indian voice synthesis; supports female/male voices |
+| Saaras v3 STT | `POST /speech-to-text` | Best Hindi/English code-mixing + auto language detection; 300ms latency; trained on Indian accents |
+| Chat Completions (sarvam-105b) | `POST /v1/chat/completions` | Native Indian language reasoning model; TRAI-compliant in-country processing |
+| Bulbul v3 TTS | `POST /text-to-speech` | 37+ Indian voices; natural Hindi/English synthesis; 8kHz telephony output |
 
 ---
 
@@ -260,7 +260,13 @@ sarvam-telecom-bot/
 ---
 
 ## Demo Video
-*(To be recorded and added)*
+
+**[Watch the demo →](_DEMO_LINK_HERE_)**
+
+3–5 minute walkthrough showing:
+- Hindi voice query → RAG retrieval → spoken response
+- English voice query → spoken response
+- Escalation flow → WhatsApp notification via n8n
 
 ---
 

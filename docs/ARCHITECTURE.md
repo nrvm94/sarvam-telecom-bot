@@ -81,9 +81,9 @@
 |-----------|-----------|---------|------------|
 | Frontend | React 18 + Vite + TailwindCSS | Voice capture UI, audio playback, conversation display | Free / Open source |
 | Backend API | FastAPI + Python 3.11 + uvicorn | Orchestrates all services, handles HTTP lifecycle | ~₹2,000/month (cloud VM) |
-| STT | Sarvam Saaras v2 | Hindi/English speech-to-text, 300ms latency | ₹0.18/minute |
-| LLM | Sarvam sarvam-m | Response generation with Airtel context | ₹0.05/1K tokens |
-| TTS | Sarvam Bulbul v1 | Natural Hindi/English voice synthesis | ₹0.10/1K chars |
+| STT | Sarvam Saaras v3 (saaras:v3) | Hindi/English + auto language detection, 300ms latency | ₹0.18/minute |
+| LLM | Sarvam sarvam-105b | Reasoning model; response generation with Airtel context | ₹0.05/1K tokens |
+| TTS | Sarvam Bulbul v3 (bulbul:v3) | 37+ Indian voices; natural Hindi/English synthesis | ₹0.10/1K chars |
 | Vector Store | ChromaDB (local SQLite) | Semantic search over Airtel knowledge base | Free (local) |
 | Embeddings | sentence-transformers/all-MiniLM-L6-v2 | Document and query embedding | Free (local model) |
 | Database | Supabase (PostgreSQL) | Call logs, conversation history, escalation tracking | Free tier / $25/month |

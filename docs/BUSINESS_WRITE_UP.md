@@ -34,6 +34,9 @@ Airtel handles over **350 million** customer interactions annually, with 68% of 
 
 ## 3. Why AI Voice Bot?
 
+### The End User
+The typical Airtel subscriber calling support is a Hindi or code-mixed Hindi-English speaker in a Tier-2 or Tier-3 city — comfortable speaking but not necessarily typing. Many are first-time smartphone users with low app digital literacy who find text-based chatbots or DTMF menus confusing. Voice is the natural interface for this segment, which represents the majority of Airtel's 485M subscriber base.
+
 ### Voice-First India
 - **500 million** Indians use voice search on mobile devices (Google India, 2024)
 - **62%** of first-time internet users in Tier-2/3 cities prefer voice over typing
@@ -67,8 +70,9 @@ India has 22 official languages and a unique linguistic phenomenon called **code
 
 ### Why This Matters for Airtel
 - **TRAI regulations** require customer data to be processed within India — Sarvam is the only AI platform with full in-country processing
+- **On-premise deployment:** Sarvam supports private cloud and on-premise deployment, meeting Airtel's data residency and internal security policy requirements without routing sensitive customer conversations to US-based servers
 - **Latency:** At 300ms per STT call, voice conversations feel natural; >1s latency breaks conversational flow
-- **Code-mixing:** 47% of Airtel's Hindi-speaking subscribers use code-mixed Hindi-English — Sarvam handles this natively
+- **Code-mixing:** 47% of Airtel's Hindi-speaking subscribers use code-mixed Hindi-English — Sarvam handles this natively; Google and AWS require explicit language selection, breaking code-switched speech
 
 ---
 

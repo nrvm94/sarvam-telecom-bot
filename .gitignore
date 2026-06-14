@@ -11,3 +11,4 @@ venv/
 *.log
 .pytest_cache/
 nul
+.claude/
