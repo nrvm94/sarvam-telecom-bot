@@ -88,3 +88,40 @@ All items confirmed and implemented in sprint on 2026-06-14.
 **Why:** Conversation panel retained previous call's history when a new call started.
 
 **Done:** `frontend/src/VoiceBot.jsx` `endCall()` — added `setConversation([])`.
+
+---
+
+## 12. Fix LLM context priority — intent-based RAG vs account data routing ✅
+
+**Why:** Three compounding problems caused the bot to give wrong answers for general Airtel knowledge questions (how-to, available plans, service info):
+
+1. **Customer data bled into general queries** — system prompt said "answer directly from customer account data" as a blanket rule. Bot injected the customer's unpaid bill amount (e.g. Rs.1247) into answers about port process, SIM loss, WiFi calling — questions that have nothing to do with the customer's account.
+
+2. **LLM ignored RAG when both contexts were present** — even when RAG retrieved the correct KB doc, the LLM prioritised customer data because the system prompt told it to. KB answers were lost.
+
+3. **Redirect instruction too broad** — "for questions outside Airtel services, redirect to app/121" caused the LLM to deflect valid how-to questions it could have answered from the KB.
+
+**Root cause identified via live testing** — 5 queries (3 Hindi, 2 Marathi) sent to `/voice/transcribe` showed all three failures reproducibly. Marathi prompts were less affected than Hindi.
+
+**Done:**
+
+`backend/agents.py` — three changes:
+
+**(a) Intent-based priority rule added to all 3 system prompts (Hindi, Marathi, English):**
+Replaced the blanket "answer from customer account data" instruction with an explicit intent rule:
+- If customer asks about their OWN account details (my plan, my bill, my data) → CUSTOMER ACCOUNT DATA is primary source.
+- If customer asks about general Airtel information, available options, how a service works — even with dative pronouns like 'मुझे/मला/tell me' — → REFERENCE MATERIAL is primary source.
+- When both are relevant (e.g. "suggest a better plan for me") → REFERENCE MATERIAL for facts, CUSTOMER ACCOUNT DATA for personalisation.
+- Key example added explicitly: "'मुझे plans बताओ' is NOT a personal account question."
+
+**(b) Redirect rule narrowed in all 3 system prompts:**
+Changed from "for questions outside Airtel services, redirect to app/121" to "only redirect when REFERENCE MATERIAL also has no answer AND the question requires real-time live data the system does not have."
+
+**(c) Billing suppression added to all 3 system prompts:**
+"Do not mention bill amount or payment status unless the customer specifically asked about billing." This prevents the LLM's helpful-but-wrong behaviour of warning about unpaid bills in every response regardless of the question topic.
+
+**(d) user_message context ordering flipped:**
+Previously: CUSTOMER ACCOUNT DATA first, then RAG. This biased the LLM toward account data due to recency.
+Now: REFERENCE MATERIAL first, CUSTOMER ACCOUNT DATA second — with explicit labels on what each is for. When no RAG context is available, falls back to CUSTOMER ACCOUNT DATA only.
+
+**Verified:** Re-ran the same 3 Hindi queries after fix — bill bleeding gone, KB content (port steps, SIM block steps, WiFi calling steps) now appears correctly in responses.

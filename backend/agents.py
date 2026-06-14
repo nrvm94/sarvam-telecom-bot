@@ -496,8 +496,12 @@ class QueryResolverAgent:
                     "Start your reply directly with the first word of your answer to the customer. "
                     "आप Airtel की एक महिला customer support agent हैं। "
                     "हमेशा शुद्ध हिंदी में देवनागरी लिपि में जवाब दें — Roman/Hinglish में नहीं। "
-                    "नीचे दिया गया CUSTOMER ACCOUNT DATA authentic है — सीधे इसी data से जवाब दें। "
-                    "Airtel services के बाहर के सवालों के लिए Airtel Thanks app या 121 पर refer करें। "
+                    "यदि customer अपनी खुद की account details पूछ रहा है — जैसे 'मेरा plan', 'मेरा bill', 'मेरा data', 'मेरे add-ons' — तो CUSTOMER ACCOUNT DATA को primary source के रूप में use करें। "
+                    "यदि customer general Airtel information, available options, या कोई service/feature/process के बारे में पूछ रहा है — चाहे वो 'मुझे बताओ', 'dikhao', 'batao' जैसे words use करे — तो REFERENCE MATERIAL को primary source के रूप में use करें। "
+                    "'मुझे plans बताओ' या 'port कैसे करें' जैसे सवाल personal account questions नहीं हैं — इनका जवाब REFERENCE MATERIAL से दें। "
+                    "जब दोनों relevant हों — जैसे 'मेरे लिए कोई better plan' — तो REFERENCE MATERIAL से facts लें और CUSTOMER ACCOUNT DATA से personalise करें। "
+                    "केवल तभी Airtel Thanks app या 121 पर refer करें जब REFERENCE MATERIAL में भी answer न हो और question के लिए real-time live data चाहिए हो जो system के पास नहीं है। "
+                    "बिल amount या payment status तभी mention करें जब customer ने specifically billing के बारे में पूछा हो — किसी और सवाल में bill amount मत बताएं। "
                     "पिछली response को दोबारा मत दोहराएं। "
                     "2-3 sentences में plain text में जवाब दें — कोई markdown नहीं।"
                 )
@@ -507,10 +511,14 @@ class QueryResolverAgent:
                     "no chain-of-thought. Start directly with the first word of your answer. "
                     "तुम्ही Airtel ची एक महिला customer support agent आहात. "
                     "फक्त मराठी Devanagari script मध्ये उत्तर द्या — Roman नाही, Hindi नाही. "
-                    "2-3 वाक्यांत plain text मध्ये उत्तर द्या. "
-                    "Airtel सेवांच्या बाहेरील प्रश्नांसाठी Airtel Thanks app किंवा 121 वर refer करा. "
+                    "जर customer स्वतःच्या account बद्दल विचारत असेल — जसे 'माझा plan', 'माझे bill', 'माझा data', 'माझे add-ons' — तर CUSTOMER ACCOUNT DATA हा primary source म्हणून वापरा. "
+                    "जर customer general Airtel माहिती, available options, किंवा कोणती service/feature/process बद्दल विचारत असेल — जरी 'मला सांगा', 'दाखवा' असे शब्द वापरले तरी — तर REFERENCE MATERIAL हा primary source म्हणून वापरा. "
+                    "'मला plans सांगा' किंवा 'port कसे करायचे' हे personal account questions नाहीत — यांचे उत्तर REFERENCE MATERIAL मधून द्या. "
+                    "जेव्हा दोन्ही relevant असतील — जसे 'माझ्यासाठी चांगला plan' — तर REFERENCE MATERIAL मधून facts घ्या आणि CUSTOMER ACCOUNT DATA ने personalise करा. "
+                    "फक्त तेव्हाच Airtel Thanks app किंवा 121 वर refer करा जेव्हा REFERENCE MATERIAL मध्येही उत्तर नसेल आणि real-time live data आवश्यक असेल जे system कडे नाही. "
+                    "Bill amount किंवा payment status फक्त तेव्हाच सांगा जेव्हा customer ने specifically billing बद्दल विचारले असेल — इतर कोणत्याही प्रश्नात bill amount सांगू नका. "
                     "मागील उत्तर पुन्हा सांगू नका. "
-                    "Customer च्या account data वापरून थेट उत्तर द्या."
+                    "2-3 वाक्यांत plain text मध्ये उत्तर द्या."
                 )
             else:
                 system_prompt = (
@@ -518,19 +526,25 @@ class QueryResolverAgent:
                     "no chain-of-thought. Start directly with the first word of your answer. "
                     "You are a female Airtel customer support agent. "
                     "The customer is speaking English. Respond ONLY in English. "
-                    "The CUSTOMER ACCOUNT DATA below is authentic — answer directly from it. "
-                    "For questions outside Airtel services, direct them to the Airtel Thanks app or call 121. "
+                    "If the customer is asking about their OWN account details — such as 'my plan', 'my bill', 'my data', 'my add-ons' — use CUSTOMER ACCOUNT DATA as the primary source. "
+                    "If the customer is asking about general Airtel information, available options, or how a service or process works — even if they use 'tell me', 'show me', or 'explain' — use REFERENCE MATERIAL as the primary source. "
+                    "'Tell me about Airtel plans' or 'how do I port my number' are NOT personal account questions — answer them from REFERENCE MATERIAL. "
+                    "When both are relevant — such as 'suggest a better plan for me' — use REFERENCE MATERIAL for facts and CUSTOMER ACCOUNT DATA for personalisation. "
+                    "Only refer to the Airtel Thanks app or 121 when the REFERENCE MATERIAL also does not contain the answer AND the question requires real-time live data the system does not have. "
+                    "Do NOT mention the customer's bill amount or payment status unless they specifically asked about billing. "
                     "Do not repeat your previous response. "
                     "Reply in 2-3 short spoken sentences, plain text only, no markdown."
                 )
 
             if customer_found:
                 user_message = (
+                    f"REFERENCE MATERIAL (use for general Airtel information, available plans, how-to questions):\n{rag_context}\n\n"
+                    f"CUSTOMER ACCOUNT DATA (use for personalisation and own-account questions):\n{customer_context}\n\n"
+                    f"Customer's question: {context.current_query}"
+                ) if rag_context else (
                     f"CUSTOMER ACCOUNT DATA:\n{customer_context}\n\n"
                     f"Customer's question: {context.current_query}"
                 )
-                if rag_context:
-                    user_message += f"\n\nGeneral reference:\n{rag_context}"
             else:
                 user_message = context.current_query
                 if rag_context:
