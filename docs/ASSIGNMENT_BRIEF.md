@@ -18,7 +18,7 @@
 
 **Submission email:**
 - To: ashok@sarvam.ai (reply to original thread)
-- Subject: `[Pre-Sales Assignment] Neerav Mahadevan — D2C Customer Support`
+- Subject: `[Pre-Sales Assignment] Neerav Mahadane — D2C Customer Support`
 
 ---
 
@@ -31,7 +31,7 @@
 | Working solution (voice bot + agentic workflow) | Required | Code + README |
 | Demo video (3–5 min, multilingual) | Required | User will record |
 | Architecture diagram | Required | `/docs/ARCHITECTURE.md` |
-| Business write-up / slide deck (1–2 pages or 8 slides) | Required | `/docs/BUSINESS_WRITE_UP.md` |
+| Business write-up / slide deck (1–2 pages or 8 slides) | Required | `/docs/Sarvam_AI_Airtel_VoiceBot_Neerav_Mahadane.pdf` |
 | Post-call analytics pipeline | Optional | Batch STT + diarization + LLM analysis |
 | Telephony integration (Plivo/Twilio) | Optional | Actual phone call demo |
 
