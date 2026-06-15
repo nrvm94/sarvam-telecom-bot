@@ -140,7 +140,7 @@ Payback period:                ~9 days of operation
 | Gap | Severity | Mitigation |
 |-----|----------|-----------|
 | No live telephony integration (SIP/PSTN) | High | Integrate Exotel/Tata Tele SIP trunk in Phase 2 |
-| Limited to 15 knowledge base documents | Medium | Ingest full Airtel policy corpus (5,000+ docs) |
+| Limited to 33 knowledge base documents | Medium | Ingest full Airtel policy corpus (5,000+ docs) |
 | No authentication (OTP-based caller verification) | High | Add Airtel OTP verification API in Phase 2 |
 | No real-time CRM integration | Medium | Integrate with Airtel's existing Salesforce CRM |
 | Single-language per session | Low | Enable mid-session language switching |
@@ -169,4 +169,4 @@ Payback period:                ~9 days of operation
 ---
 
 *Document prepared for Airtel CTO / VP Operations review*
-*Sarvam AI Partnership Proposal — June 2025*
+*Sarvam AI Partnership Proposal — June 2026*

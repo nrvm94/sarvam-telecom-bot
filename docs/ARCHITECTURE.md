@@ -8,34 +8,38 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                        CUSTOMER BROWSER                         │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │  React Frontend (Vite + TailwindCSS) — localhost:3000   │   │
+│  │  React Frontend (Vite + TailwindCSS)                    │   │
+│  │  sarvam-telecom-bot-production.up.railway.app           │   │
 │  │  • WebRTC Microphone capture (MediaRecorder API)        │   │
+│  │  • WebSocket real-time voice pipeline                   │   │
 │  │  • Web Audio API for TTS playback                       │   │
 │  │  • Conversation history UI                              │   │
 │  └────────────────────┬────────────────────────────────────┘   │
 └───────────────────────┼─────────────────────────────────────────┘
-                        │  HTTP/JSON (audio as base64)
+                        │  WS + HTTP/JSON
                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              FastAPI Backend — localhost:8000                   │
+│   FastAPI Backend — sarvam-telecom-bot-production.up.railway.app│
 │                                                                  │
-│  POST /voice/start      → Create call session                   │
-│  POST /voice/transcribe → Full pipeline (STT→RAG→LLM→TTS)     │
-│  POST /voice/end        → End session                           │
-│  POST /n8n/webhook      → Receive escalation callback          │
+│  WS  /ws/voice/{call_id} → Real-time voice pipeline            │
+│  POST /voice/start        → Create call session                 │
+│  POST /voice/transcribe   → Full pipeline (STT→RAG→LLM→TTS)   │
+│  POST /voice/end          → End session                         │
+│  POST /n8n/webhook        → Receive escalation callback         │
+│  POST /mock/ticket        → Mock ticket system (built-in)       │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │SarvamClient  │  │AirtelKB (RAG)│  │ConversationManager   │  │
 │  │• STT (Saaras)│  │• ChromaDB    │  │• detect_escalation() │  │
-│  │• LLM         │  │• MiniLM-L6v2 │  │• classify_issue()    │  │
-│  │• TTS (Bulbul)│  │• 21 KB docs  │  └──────────────────────┘  │
+│  │• LLM         │  │• ONNX embed  │  │• classify_issue()    │  │
+│  │• TTS (Bulbul)│  │• 33 KB docs  │  └──────────────────────┘  │
 │  └──────┬───────┘  └──────────────┘                            │
 └─────────┼──────────────────────────────────────────────────────┘
           │                    │                      │
           ▼                    ▼                      ▼
 ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────────┐
 │   SARVAM AI APIs │ │   CHROMADB       │ │   SUPABASE           │
-│  (api.sarvam.ai) │ │  (local SQLite)  │ │  (PostgreSQL cloud)  │
+│  (api.sarvam.ai) │ │  (Railway disk)  │ │  (PostgreSQL cloud)  │
 │                  │ │                  │ │                      │
 │ /speech-to-text  │ │ Vector store for │ │  Table: calls        │
 │   ↑ 300ms STT    │ │ knowledge base   │ │  • call_id           │
@@ -49,28 +53,25 @@
           │ escalate=True
           ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│               N8N AUTOMATION — localhost:5678                    │
+│               N8N CLOUD — nrvmhdn.app.n8n.cloud                  │
 │                                                                   │
 │  Webhook Trigger                                                  │
 │       ↓                                                           │
 │  Set Fields (extract call_id, issue_type, user_query)            │
 │       ↓                                                           │
-│  HTTP: Create Ticket → localhost:5000/mock/ticket                 │
+│  HTTP: Create Ticket → .../mock/ticket (Railway backend)          │
 │       ↓                                                           │
 │  HTTP: Send WhatsApp → 360dialog sandbox API                     │
 │       ↓                                                           │
-│  HTTP: Callback → localhost:8000/n8n/webhook                      │
+│  HTTP: Callback → .../n8n/webhook (Railway backend)              │
 └──────────────────────────────────────────────────────────────────┘
           │
           ▼
-┌──────────────────┐  ┌──────────────────────────────────────────┐
-│  MOCK SERVER     │  │  360DIALOG (WhatsApp Business API)       │
-│  localhost:5000  │  │  waba-sandbox.360dialog.io               │
-│                  │  │                                          │
-│ POST /mock/ticket│  │  Send escalation notification to         │
-│ POST /mock/sms   │  │  customer's WhatsApp number             │
-│ POST /mock/whats │  └──────────────────────────────────────────┘
-└──────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  360DIALOG (WhatsApp Business API)                               │
+│  waba-sandbox.360dialog.io                                       │
+│  Send escalation notification to customer's WhatsApp number      │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -80,16 +81,16 @@
 | Component | Technology | Purpose | Cost Model |
 |-----------|-----------|---------|------------|
 | Frontend | React 18 + Vite + TailwindCSS | Voice capture UI, audio playback, conversation display | Free / Open source |
-| Backend API | FastAPI + Python 3.11 + uvicorn | Orchestrates all services, handles HTTP lifecycle | ~₹2,000/month (cloud VM) |
+| Backend API | FastAPI + Python 3.11 + uvicorn | Orchestrates all services, handles HTTP + WebSocket | Railway (~$5/month) |
 | STT | Sarvam Saaras v3 (saaras:v3) | Hindi/English + auto language detection, 300ms latency | ₹0.18/minute |
 | LLM | Sarvam sarvam-105b | Reasoning model; response generation with Airtel context | ₹0.05/1K tokens |
 | TTS | Sarvam Bulbul v3 (bulbul:v3) | 37+ Indian voices; natural Hindi/English synthesis | ₹0.10/1K chars |
-| Vector Store | ChromaDB (local SQLite) | Semantic search over Airtel knowledge base | Free (local) |
-| Embeddings | sentence-transformers/all-MiniLM-L6-v2 | Document and query embedding | Free (local model) |
+| Vector Store | ChromaDB (Railway disk) | Semantic search over 33 Airtel knowledge base docs | Free (bundled) |
+| Embeddings | ChromaDB DefaultEmbeddingFunction (ONNX) | Document and query embedding — no PyTorch required | Free (bundled) |
 | Database | Supabase (PostgreSQL) | Call logs, conversation history, escalation tracking | Free tier / $25/month |
-| Automation | n8n (Docker) | Escalation workflow orchestration | Free (self-hosted) |
+| Automation | n8n Cloud | Escalation workflow orchestration | Free tier |
 | WhatsApp | 360dialog Business API | Customer notifications | ₹0.50/message |
-| Mock Server | FastAPI (port 5000) | Simulates ticket system for testing | Free |
+| Mock Endpoints | Built into FastAPI (/mock/* routes) | Simulates ticket system for testing | Free |
 
 ---
 
@@ -108,7 +109,7 @@
 ## Data Flow: Happy Path (No Escalation)
 
 ```
-1. User opens browser → http://localhost:3000
+1. User opens browser → https://sarvam-telecom-bot-production.up.railway.app
    └─ React app loads, microphone permission requested
 
 2. User clicks "Start Call"
@@ -155,15 +156,15 @@
     └─ Issue classify: "galat" → "billing_dispute"
 
 5c. trigger_n8n_escalation() fires (non-blocking):
-    └─ POST http://localhost:5678/webhook/escalation
+    └─ POST https://nrvmhdn.app.n8n.cloud/webhook/escalation
        {call_id, issue_type: "billing_dispute", user_query, bot_response}
 
-6. n8n workflow executes:
+6. n8n Cloud workflow executes:
    a. Webhook receives payload
    b. Set Fields extracts call_id, issue_type
-   c. POST http://localhost:5000/mock/ticket → {ticket_id: "TKT-58291"}
+   c. POST https://sarvam-telecom-bot-production.up.railway.app/mock/ticket → {ticket_id: "TKT-58291"}
    d. POST https://waba-sandbox.360dialog.io/v1/messages → WhatsApp sent
-   e. POST http://localhost:8000/n8n/webhook → {call_id, ticket_id, status: "escalated"}
+   e. POST https://sarvam-telecom-bot-production.up.railway.app/n8n/webhook → {call_id, ticket_id, status: "escalated"}
 
 7. FastAPI /n8n/webhook:
    └─ supabase.update_escalation(call_id, ticket_id, "escalated")

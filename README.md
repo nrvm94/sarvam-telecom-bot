@@ -1,7 +1,7 @@
 # Sarvam Telecom Voice Bot
 ### AI-Powered Customer Support for Airtel — Built on Sarvam AI
 
-> **Live Demo:** Coming Soon | **GitHub:** https://github.com/nrvm94/sarvam-telecom-bot
+> **Live Demo:** https://sarvam-telecom-bot-production.up.railway.app | **GitHub:** https://github.com/nrvm94/sarvam-telecom-bot
 
 ---
 
@@ -35,20 +35,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system diagram.
 | LLM | Sarvam sarvam-105b | Response generation (reasoning model) |
 | TTS | Sarvam Bulbul v3 (bulbul:v3) | Text-to-speech, 37+ Indian voices |
 | Vector DB | ChromaDB | Semantic search over KB |
-| Embeddings | sentence-transformers/all-MiniLM-L6-v2 | Document embeddings |
+| Embeddings | ChromaDB DefaultEmbeddingFunction (ONNX) | Document embeddings — no PyTorch required |
 | Database | Supabase (PostgreSQL) | Call logs and conversation history |
-| Automation | n8n (Docker) | Escalation workflow |
+| Automation | n8n Cloud | Escalation workflow |
 | Notifications | 360dialog WhatsApp API | Customer notifications |
-| Mock Services | FastAPI (port 5000) | Downstream service simulation |
 
 ---
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - Node.js 18+
 - npm 9+
-- Docker Desktop (for n8n)
 - Chrome browser (for microphone access via WebRTC)
 - Git
 
@@ -86,57 +84,39 @@ python main.py
 ```
 Verify: http://localhost:8000/health → `{"status":"ok"}`
 
-### 5. Start Mock Server (separate terminal)
-```bash
-cd backend
-python mock_server.py
-```
-Verify: `curl -X POST http://localhost:5000/mock/ticket`
-
-### 6. Frontend Setup
+### 5. Frontend Setup
 ```bash
 cd frontend
 npm install
 ```
 
-### 7. Start Frontend
+### 6. Start Frontend
 ```bash
 cd frontend
 npm run dev
 ```
 Verify: http://localhost:3000 → Airtel Support Bot UI
 
-### 8. Start n8n (optional — for escalation workflow)
-```bash
-docker-compose up -d
-```
-Open http://localhost:5678 and follow [n8n/workflow_instructions.md](n8n/workflow_instructions.md)
+### 7. n8n Escalation (optional — uses n8n Cloud)
+Follow [n8n/workflow_instructions.md](n8n/workflow_instructions.md) to configure the cloud workflow.
 
 ---
 
 ## Running All Components
 
-Open 3 terminal windows:
+Open 2 terminal windows:
 
 **Terminal 1 — Backend:**
 ```bash
 cd backend && python main.py
 ```
 
-**Terminal 2 — Mock Server:**
-```bash
-cd backend && python mock_server.py
-```
-
-**Terminal 3 — Frontend:**
+**Terminal 2 — Frontend:**
 ```bash
 cd frontend && npm run dev
 ```
 
-**Terminal 4 (optional) — n8n:**
-```bash
-docker-compose up
-```
+> n8n escalation runs on n8n Cloud — no local process needed.
 
 ---
 
@@ -169,12 +149,12 @@ Full API documentation: [docs/API_SPEC.md](docs/API_SPEC.md)
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `SARVAM_API_KEY` | Sarvam AI API key | `sk_xxx...` |
-| `SARVAM_API_BASE` | Sarvam API base URL | `https://api.sarvam.ai/v1` |
+| `SARVAM_API_BASE` | Sarvam API base URL | `https://api.sarvam.ai` |
 | `DIALOG_360_API_KEY` | 360dialog WhatsApp API key | `Z47M...` |
 | `DIALOG_360_BASE_URL` | 360dialog base URL | `https://waba-sandbox.360dialog.io` |
 | `SUPABASE_URL` | Supabase project URL | `https://xxx.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | `eyJhbGci...` |
-| `N8N_WEBHOOK_URL` | n8n escalation webhook | `http://localhost:5678/webhook/escalation` |
+| `N8N_WEBHOOK_URL` | n8n escalation webhook | `https://<your-n8n-cloud>/webhook/escalation` |
 | `FRONTEND_URL` | Frontend URL for CORS | `http://localhost:3000` |
 | `BACKEND_URL` | Backend URL | `http://localhost:8000` |
 | `ENVIRONMENT` | Runtime environment | `development` |
@@ -205,7 +185,7 @@ Step-by-step setup guide: [n8n/workflow_instructions.md](n8n/workflow_instructio
 
 Quick test after setup:
 ```bash
-curl -X POST http://localhost:5678/webhook/escalation \
+curl -X POST https://nrvmhdn.app.n8n.cloud/webhook/escalation \
   -H "Content-Type: application/json" \
   -d '{"call_id":"test_123","issue_type":"billing_dispute","user_query":"wrong charge","bot_response":"escalating"}'
 ```
@@ -229,15 +209,18 @@ Key numbers:
 sarvam-telecom-bot/
 ├── .env                          # Credentials (gitignored)
 ├── .env.example                  # Template for credentials
-├── docker-compose.yml            # n8n service
+├── railway.json                  # Railway deployment config
+├── .python-version               # Python 3.11 pin for Railway
 ├── README.md
 ├── backend/
-│   ├── main.py                   # FastAPI app + pipeline orchestration
+│   ├── main.py                   # FastAPI app + pipeline + mock endpoints
 │   ├── sarvam_client.py          # STT + LLM + TTS API client
-│   ├── rag_engine.py             # ChromaDB RAG engine
-│   ├── conversation.py           # Escalation + issue classification
+│   ├── rag_engine.py             # ChromaDB RAG engine (ONNX embeddings)
+│   ├── voice_pipeline.py         # WebSocket real-time voice pipeline
+│   ├── orchestrator.py           # Multi-agent pipeline coordinator
+│   ├── agents.py                 # Customer profile, query, escalation agents
+│   ├── conversation.py           # Conversation state management
 │   ├── supabase_client.py        # Database operations
-│   ├── mock_server.py            # Mock downstream services
 │   └── requirements.txt
 ├── frontend/
 │   ├── index.html
@@ -248,11 +231,11 @@ sarvam-telecom-bot/
 │       ├── App.jsx
 │       └── VoiceBot.jsx          # Main UI component
 ├── db/
-│   └── airtel_kb.json            # 21-document Airtel knowledge base
+│   └── airtel_kb.json            # 33-document Airtel knowledge base
 ├── n8n/
-│   └── workflow_instructions.md  # n8n setup guide
+│   └── workflow_instructions.md  # n8n Cloud workflow setup guide
 └── docs/
-    ├── Sarvam_AI_Airtel_VoiceBot_Neerav_Mahadane.pdf  # Slide deck (8 slides, CXO-ready)
+    ├── Sarvam_Airtel_VoiceBot_Final_2.pdf             # Slide deck (8 slides, CXO-ready)
     ├── BUSINESS_WRITE_UP.md      # Business case write-up for Airtel CTO
     ├── ARCHITECTURE.md           # System architecture
     ├── API_SPEC.md               # API documentation

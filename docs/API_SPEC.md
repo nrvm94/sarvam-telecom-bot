@@ -1,6 +1,6 @@
 # API Specification — Sarvam Telecom Bot
 
-Base URL: `http://localhost:8000`
+Base URL: `https://sarvam-telecom-bot-production.up.railway.app`
 
 All requests and responses use `Content-Type: application/json`.
 
@@ -21,7 +21,7 @@ Health check endpoint. Returns service status and current timestamp.
 
 ### Example
 ```bash
-curl http://localhost:8000/health
+curl https://sarvam-telecom-bot-production.up.railway.app/health
 ```
 
 ```json
@@ -58,7 +58,7 @@ Initiate a new voice call session. Returns a unique call_id for subsequent reque
 
 ### Example
 ```bash
-curl -X POST http://localhost:8000/voice/start \
+curl -X POST https://sarvam-telecom-bot-production.up.railway.app/voice/start \
   -H "Content-Type: application/json" \
   -d '{
     "customer_phone": "9876543210",
@@ -128,7 +128,7 @@ Main voice pipeline endpoint. Accepts audio, runs STT → RAG → LLM → TTS, a
 # First encode an audio file to base64
 AUDIO_B64=$(base64 -w 0 test_audio.webm)
 
-curl -X POST http://localhost:8000/voice/transcribe \
+curl -X POST https://sarvam-telecom-bot-production.up.railway.app/voice/transcribe \
   -H "Content-Type: application/json" \
   -d "{
     \"audio_base64\": \"$AUDIO_B64\",
@@ -175,7 +175,7 @@ End an active call session. Records duration and marks call as completed in Supa
 
 ### Example
 ```bash
-curl -X POST http://localhost:8000/voice/end \
+curl -X POST https://sarvam-telecom-bot-production.up.railway.app/voice/end \
   -H "Content-Type: application/json" \
   -d '{
     "call_id": "call_a1b2c3d4e5f6",
@@ -217,7 +217,7 @@ Receives callback from n8n after escalation workflow completion. Updates call re
 
 ### Example (simulating n8n callback)
 ```bash
-curl -X POST http://localhost:8000/n8n/webhook \
+curl -X POST https://sarvam-telecom-bot-production.up.railway.app/n8n/webhook \
   -H "Content-Type: application/json" \
   -d '{
     "call_id": "call_a1b2c3d4e5f6",
@@ -235,11 +235,11 @@ curl -X POST http://localhost:8000/n8n/webhook \
 
 ---
 
-## Mock Server Endpoints (port 5000)
+## Mock Endpoints (built into main API)
 
 ### POST /mock/ticket
 ```bash
-curl -X POST http://localhost:5000/mock/ticket
+curl -X POST https://sarvam-telecom-bot-production.up.railway.app/mock/ticket
 ```
 ```json
 {
@@ -251,7 +251,7 @@ curl -X POST http://localhost:5000/mock/ticket
 
 ### POST /mock/sms
 ```bash
-curl -X POST http://localhost:5000/mock/sms
+curl -X POST https://sarvam-telecom-bot-production.up.railway.app/mock/sms
 ```
 ```json
 {
@@ -262,7 +262,7 @@ curl -X POST http://localhost:5000/mock/sms
 
 ### POST /mock/whatsapp
 ```bash
-curl -X POST http://localhost:5000/mock/whatsapp
+curl -X POST https://sarvam-telecom-bot-production.up.railway.app/mock/whatsapp
 ```
 ```json
 {
