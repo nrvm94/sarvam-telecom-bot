@@ -4,7 +4,6 @@ __pycache__/
 node_modules/
 chromadb/
 .DS_Store
-dist/
 *.egg-info/
 .venv/
 venv/
