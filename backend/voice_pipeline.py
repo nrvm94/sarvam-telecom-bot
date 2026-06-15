@@ -22,10 +22,11 @@ import wave
 
 logger = logging.getLogger(__name__)
 
-_SPEECH_RMS = 300           # RMS above this counts as speech
+_SPEECH_RMS = 600           # RMS above this counts as speech
 _SILENCE_CHUNKS = 15        # consecutive quiet chunks before end-of-utterance
 _MIN_SPEECH_CHUNKS = 2      # discard very short blips
 _MAX_AUDIO_BYTES = 30 * 16000 * 2   # 30-second hard cap (PCM16 @ 16 kHz)
+_BARGE_IN_CHUNKS = 3        # consecutive high-energy chunks before barge-in fires
 
 
 def _rms(chunk: bytes) -> float:
@@ -59,6 +60,7 @@ async def run_voice_ws_pipeline(
     speech_chunks = 0
     silence_chunks = 0
     in_speech = False
+    pre_chunks = 0
 
     try:
         while True:
@@ -79,9 +81,14 @@ async def run_voice_ws_pipeline(
 
             if energy >= _SPEECH_RMS:
                 if not in_speech:
-                    await websocket.send_json({"type": "speech_start"})
-                in_speech = True
-                silence_chunks = 0
+                    pre_chunks += 1
+                    if pre_chunks >= _BARGE_IN_CHUNKS:
+                        await websocket.send_json({"type": "speech_start"})
+                        in_speech = True
+                        silence_chunks = 0
+                        pre_chunks = 0
+                else:
+                    silence_chunks = 0
                 speech_chunks += 1
                 buf.append(raw)
                 if sum(len(c) for c in buf) >= _MAX_AUDIO_BYTES:
@@ -90,9 +97,11 @@ async def run_voice_ws_pipeline(
                     speech_chunks = 0
                     silence_chunks = 0
                     in_speech = False
+                    pre_chunks = 0
             elif in_speech:
                 buf.append(raw)
                 silence_chunks += 1
+                pre_chunks = 0
                 if silence_chunks >= _SILENCE_CHUNKS:
                     if speech_chunks >= _MIN_SPEECH_CHUNKS:
                         lang = await _process(websocket, call_id, b"".join(buf), lang, sarvam_client, orchestrator)
@@ -100,6 +109,8 @@ async def run_voice_ws_pipeline(
                     speech_chunks = 0
                     silence_chunks = 0
                     in_speech = False
+            else:
+                pre_chunks = 0
 
     except Exception as exc:
         logger.error("voice_pipeline error | call_id=%s | %s", call_id, exc, exc_info=True)

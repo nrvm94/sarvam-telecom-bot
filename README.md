@@ -246,7 +246,7 @@ sarvam-telecom-bot/
 
 ## Demo Video
 
-**[Watch the demo →](_DEMO_LINK_HERE_)**
+**[Watch the demo →](https://www.loom.com/share/d1816485cb9e439a9dbd33c8a41f433c)**
 
 3–5 minute walkthrough showing:
 - Hindi voice query → RAG retrieval → spoken response
