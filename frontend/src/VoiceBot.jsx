@@ -205,6 +205,11 @@ export default function VoiceBot() {
     try { msg = JSON.parse(event.data) } catch { return }
 
     if (msg.type === 'transcript') {
+      if (isBotSpeakingRef.current) {
+        audioQueueRef.current.stop()
+        audioQueueRef.current = new AudioQueue()
+        isBotSpeakingRef.current = false
+      }
       setTranscription(msg.text)
       setBotStatus('processing')
       setStatusMsg('Bot is thinking...')
@@ -304,7 +309,6 @@ export default function VoiceBot() {
     proc.onaudioprocess = (e) => {
       const ws = wsRef.current
       if (!ws || ws.readyState !== WebSocket.OPEN) return
-      if (isBotSpeakingRef.current) return  // mute mic while bot is speaking
 
       const inputData = e.inputBuffer.getChannelData(0)  // Float32 at ctx.sampleRate
       const pcm16 = float32ToInt16At16k(inputData, ctx.sampleRate)
