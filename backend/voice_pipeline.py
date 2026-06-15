@@ -78,6 +78,8 @@ async def run_voice_ws_pipeline(
             energy = _rms(raw)
 
             if energy >= _SPEECH_RMS:
+                if not in_speech:
+                    await websocket.send_json({"type": "speech_start"})
                 in_speech = True
                 silence_chunks = 0
                 speech_chunks += 1

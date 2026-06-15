@@ -204,17 +204,23 @@ export default function VoiceBot() {
     let msg
     try { msg = JSON.parse(event.data) } catch { return }
 
-    if (msg.type === 'transcript') {
+    if (msg.type === 'speech_start') {
       if (isBotSpeakingRef.current) {
         audioQueueRef.current.stop()
         audioQueueRef.current = new AudioQueue()
         isBotSpeakingRef.current = false
+        setBotStatus('active')
+        setStatusMsg('Listening...')
       }
+    }
+
+    else if (msg.type === 'transcript') {
       setTranscription(msg.text)
       setBotStatus('processing')
       setStatusMsg('Bot is thinking...')
       pendingTurnRef.current = { transcript: msg.text, timestamp: nowISO() }
     }
+
 
     else if (msg.type === 'response') {
       setBotResponse(msg.text)
