@@ -18,7 +18,8 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # ---- Load environment first, before importing local modules ---------------
@@ -520,6 +521,22 @@ async def mock_activate_data_pack():
 async def mock_raise_complaint():
     complaint_id = "CMP-" + str(random.randint(10000, 99999))
     return {"status": "success", "complaint_id": complaint_id, "sla": "48 hours"}
+
+
+# ---- Serve React SPA -------------------------------------------------------
+_DIST_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+
+if os.path.isdir(_DIST_DIR):
+    _assets_dir = os.path.join(_DIST_DIR, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        file_path = os.path.join(_DIST_DIR, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(_DIST_DIR, "index.html"))
 
 
 # ---- Entrypoint ----------------------------------------------------------
