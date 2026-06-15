@@ -6,6 +6,7 @@ Orchestrates: STT → RAG → LLM → TTS → Supabase → n8n escalation
 import base64
 import logging
 import os
+import random
 import time
 import uuid
 from datetime import datetime, timezone
@@ -478,6 +479,47 @@ async def n8n_callback(request: Request):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
+
+# ---- Mock downstream endpoints (replaces standalone mock_server.py) -------
+# n8n workflow calls these during escalation flow.
+
+@app.post("/mock/ticket")
+async def mock_create_ticket():
+    ticket_id = "TKT-" + str(random.randint(10000, 99999))
+    return {"ticket_id": ticket_id, "status": "created", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+@app.post("/mock/sms")
+async def mock_send_sms():
+    return {"status": "sent", "message": "SMS delivered"}
+
+@app.post("/mock/whatsapp")
+async def mock_send_whatsapp():
+    return {"status": "sent", "message": "WhatsApp delivered"}
+
+@app.post("/mock/cancel-addon")
+async def mock_cancel_addon():
+    return {"status": "success", "message": "Add-on cancellation submitted", "effective": "within 2 hours"}
+
+@app.post("/mock/schedule-callback")
+async def mock_schedule_callback():
+    return {"status": "success", "callback_time": "within 2 hours", "agent": "Senior Support"}
+
+@app.post("/mock/send-bill")
+async def mock_send_bill():
+    return {"status": "success", "message": "Bill sent to WhatsApp"}
+
+@app.post("/mock/recharge")
+async def mock_recharge():
+    return {"status": "success", "amount": "processed", "new_balance": "updated"}
+
+@app.post("/mock/activate-data-pack")
+async def mock_activate_data_pack():
+    return {"status": "success", "data_added": "1GB", "valid_for": "24 hours"}
+
+@app.post("/mock/raise-complaint")
+async def mock_raise_complaint():
+    complaint_id = "CMP-" + str(random.randint(10000, 99999))
+    return {"status": "success", "complaint_id": complaint_id, "sla": "48 hours"}
 
 
 # ---- Entrypoint ----------------------------------------------------------
