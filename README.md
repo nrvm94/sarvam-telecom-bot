@@ -235,7 +235,7 @@ sarvam-telecom-bot/
 ├── n8n/
 │   └── workflow_instructions.md  # n8n Cloud workflow setup guide
 └── docs/
-    ├── Sarvam_Airtel_VoiceBot_Final_2.pdf             # Slide deck (8 slides, CXO-ready)
+    ├── Sarvam_Airtel_VoiceBot.pdf                    # Slide deck (8 slides, CXO-ready)
     ├── BUSINESS_WRITE_UP.md      # Business case write-up for Airtel CTO
     ├── ARCHITECTURE.md           # System architecture
     ├── API_SPEC.md               # API documentation
