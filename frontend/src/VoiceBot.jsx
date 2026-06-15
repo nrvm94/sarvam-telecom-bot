@@ -254,13 +254,16 @@ export default function VoiceBot() {
           { role: 'bot', text: responseText, timestamp: ts },
         ])
 
-        // Wait for audio queue to drain, then switch back to listening
+        // Wait for audio queue to drain, then add 300ms cooldown before
+        // resuming capture — prevents bot's echo being picked up on Mac
         const checkDone = setInterval(() => {
           if (!audioQueueRef.current.playing) {
             clearInterval(checkDone)
-            isBotSpeakingRef.current = false
-            setBotStatus('active')
-            setStatusMsg('Listening...')
+            setTimeout(() => {
+              isBotSpeakingRef.current = false
+              setBotStatus('active')
+              setStatusMsg('Listening...')
+            }, 300)
           }
         }, 200)
       }
@@ -301,6 +304,7 @@ export default function VoiceBot() {
     proc.onaudioprocess = (e) => {
       const ws = wsRef.current
       if (!ws || ws.readyState !== WebSocket.OPEN) return
+      if (isBotSpeakingRef.current) return  // mute mic while bot is speaking
 
       const inputData = e.inputBuffer.getChannelData(0)  // Float32 at ctx.sampleRate
       const pcm16 = float32ToInt16At16k(inputData, ctx.sampleRate)
